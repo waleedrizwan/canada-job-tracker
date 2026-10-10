@@ -4,64 +4,59 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Ontario Job Tracker</title>
+  <meta name="description" content="Explore job postings across Ontario by occupation, city and offered wage, using Government of Canada Job Bank open data and Statistics Canada vacancy estimates." />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
   <header class="top">
     <div>
       <h1>Ontario Job Tracker</h1>
-      <p class="sub" id="as-of">Loading…</p>
+      <p class="sub" id="as-of">Loading postings…</p>
     </div>
     <button class="ghost" id="theme-toggle" type="button" aria-label="Toggle dark mode">◐</button>
   </header>
 
-  <div class="banner" id="sample-banner" hidden>
-    <strong>Sample data.</strong> These postings are synthetic. Run <code>npm run fetch</code> with a TheirStack API key to load real Ontario postings.
-  </div>
-
   <section class="filters" aria-label="Filters">
     <label class="f-search">
       <span>Search</span>
-      <input type="search" id="f-q" placeholder="Title or company" />
+      <input type="search" id="f-q" placeholder="Job title or occupation" />
     </label>
     <label>
       <span>Category</span>
       <select id="f-category"><option value="">All categories</option></select>
     </label>
     <label>
+      <span>Occupation</span>
+      <select id="f-occupation"><option value="">All occupations</option></select>
+    </label>
+    <label>
       <span>City</span>
       <select id="f-city"><option value="">All cities</option></select>
     </label>
     <label>
-      <span>Work mode</span>
-      <select id="f-mode"><option value="">Any</option></select>
+      <span>Skill level</span>
+      <select id="f-level"><option value="">Any</option></select>
     </label>
     <label>
-      <span>Type</span>
+      <span>Hours</span>
       <select id="f-type"><option value="">Any</option></select>
     </label>
     <label>
-      <span>Seniority</span>
-      <select id="f-seniority"><option value="">Any</option></select>
+      <span>Term</span>
+      <select id="f-term"><option value="">Any</option></select>
     </label>
     <label>
-      <span>Min pay <output id="f-pay-out">$0</output></span>
-      <input type="range" id="f-pay" min="0" max="200000" step="5000" value="0" />
+      <span>Min wage <output id="f-wage-out">Any</output></span>
+      <input type="range" id="f-wage" min="0" max="80" step="1" value="0" />
     </label>
     <label>
-      <span>Posted within</span>
-      <select id="f-age">
-        <option value="7">7 days</option>
-        <option value="14">14 days</option>
-        <option value="30" selected>30 days</option>
-        <option value="60">60 days</option>
-        <option value="">Any time</option>
-      </select>
+      <span>Posted</span>
+      <select id="f-month"><option value="">All months</option></select>
     </label>
-    <div class="checks">
-      <label class="check"><input type="checkbox" id="f-open" checked /> Hide closed</label>
-      <label class="check"><input type="checkbox" id="f-salary" /> Pay listed only</label>
-    </div>
+    <label>
+      <span>Source</span>
+      <select id="f-source"><option value="">All sources</option></select>
+    </label>
     <button type="button" class="ghost" id="f-reset">Reset</button>
   </section>
 
@@ -70,33 +65,53 @@
   <main class="grid">
     <article class="card">
       <h2>Postings by category</h2>
-      <p class="hint">Click a bar to filter</p>
+      <p class="hint">NOC 2021 broad occupational category · click a bar to filter</p>
       <div class="chart" id="c-category"></div>
     </article>
     <article class="card">
-      <h2>Salary distribution</h2>
-      <p class="hint">Annual midpoint, CAD, postings with pay listed</p>
-      <div class="chart" id="c-salary"></div>
+      <h2>Median offered wage by category</h2>
+      <p class="hint">Hourly, midpoint of the posted range · click a bar to filter</p>
+      <div class="chart" id="c-wage-cat"></div>
     </article>
     <article class="card">
-      <h2>Median pay by category</h2>
-      <p class="hint">Annual midpoint, CAD</p>
-      <div class="chart" id="c-pay-cat"></div>
+      <h2>Most-posted occupations</h2>
+      <p class="hint">Top 12 NOC unit groups · click a bar to filter</p>
+      <div class="chart" id="c-occupation"></div>
     </article>
     <article class="card">
       <h2>Postings by city</h2>
-      <p class="hint">Top 10 · click a bar to filter</p>
+      <p class="hint">Top 12 · click a bar to filter</p>
       <div class="chart" id="c-city"></div>
     </article>
     <article class="card">
-      <h2>Posting age</h2>
-      <p class="hint">Days since posted · older postings are more likely to be stale</p>
-      <div class="chart" id="c-age"></div>
+      <h2>Offered wage distribution</h2>
+      <p class="hint">Hourly midpoint, $2 bins</p>
+      <div class="chart" id="c-wage"></div>
     </article>
     <article class="card">
-      <h2>Source mix</h2>
-      <p class="hint">Where the postings were collected</p>
+      <h2>New postings per week</h2>
+      <p class="hint">By first posting date</p>
+      <div class="chart" id="c-weekly"></div>
+    </article>
+    <article class="card">
+      <h2>Skill level required</h2>
+      <p class="hint">NOC TEER category · click a bar to filter</p>
+      <div class="chart" id="c-level"></div>
+    </article>
+    <article class="card">
+      <h2>Where postings come from</h2>
+      <p class="hint">Job Bank also republishes postings from partner job boards</p>
       <div class="chart" id="c-source"></div>
+    </article>
+    <article class="card wide">
+      <h2>Postings vs. estimated vacancies</h2>
+      <p class="hint" id="bench-hint">Share of the Ontario total in each category</p>
+      <div class="chart" id="c-bench"></div>
+      <p class="note-box">
+        Statistics Canada surveys employers for the number of jobs they are actively trying to fill, whether or not those jobs are advertised.
+        Where Job Bank's share is higher than StatCan's, Job Bank over-represents that kind of work. Where it's lower, most of those openings are
+        advertised elsewhere or filled without a public posting. This chart reflects all Ontario postings in the selected months and ignores the other filters.
+      </p>
     </article>
   </main>
 
@@ -109,14 +124,14 @@
       <table id="jobs">
         <thead>
           <tr>
-            <th data-sort="title">Title</th>
-            <th data-sort="company">Company</th>
-            <th data-sort="category">Category</th>
+            <th data-sort="title">Job title</th>
+            <th data-sort="occupation">Occupation</th>
             <th data-sort="city">City</th>
-            <th data-sort="workMode">Mode</th>
-            <th data-sort="pay" class="num">Pay</th>
-            <th data-sort="age" class="num">Age</th>
-            <th data-sort="source">Source</th>
+            <th data-sort="employmentType">Hours</th>
+            <th data-sort="term">Term</th>
+            <th data-sort="wage" class="num">Wage</th>
+            <th data-sort="vacancies" class="num">Openings</th>
+            <th data-sort="postedAt">Posted</th>
           </tr>
         </thead>
         <tbody></tbody>
@@ -130,8 +145,16 @@
   </section>
 
   <footer class="foot">
-    Postings data measures what's advertised online, not total hiring. Internal fills, referrals and agency hires never appear, and
-    some live postings have no hiring behind them. Compare against StatCan's Job Vacancy and Wage Survey before drawing conclusions.
+    <p>
+      <strong>Sources.</strong> Postings come from <a id="src-link" href="https://open.canada.ca/data/en/dataset/ea639e28-c0fc-48bf-b5dd-b8899bd43072" target="_blank" rel="noopener">Job Postings Advertised on Canada's National Job Bank</a>
+      (Employment and Social Development Canada, Open Government Licence – Canada). Vacancy estimates come from Statistics Canada's
+      <a href="https://www150.statcan.gc.ca/t1/tbl1/en/tv.action?pid=1410044401" target="_blank" rel="noopener">Job Vacancy and Wage Survey, table 14-10-0444-01</a>.
+    </p>
+    <p>
+      <strong>Caveats.</strong> Job Bank captures only part of the market. It over-represents employers hiring through the Temporary Foreign Worker program
+      (who must advertise there) and under-represents professional and tech roles. The data has no employer names and doesn't record when a job was filled.
+      Wages are converted to hourly at 40 hours a week unless the posting gives its hours. Toronto includes North York, Etobicoke, Scarborough, York and East York.
+    </p>
   </footer>
 
   <div class="tooltip" id="tooltip" role="status" hidden></div>
