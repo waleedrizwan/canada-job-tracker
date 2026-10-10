@@ -52,7 +52,7 @@ pub struct MonthFile {
 
 fn client() -> reqwest::Client {
     reqwest::Client::builder()
-        .user_agent("ontario-job-tracker (+https://github.com/waleedrizwan/ontario-job-tracker)")
+        .user_agent("canada-job-tracker (+https://github.com/waleedrizwan/canada-job-tracker)")
         .build()
         .expect("http client")
 }

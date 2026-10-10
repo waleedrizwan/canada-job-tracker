@@ -663,7 +663,7 @@ pub fn page(ds: &Dataset, p: &Params) -> Markup {
                             "Some Quebec postings have French titles. Toronto includes North York, Etobicoke, Scarborough, York and East York."
                         }
                     }
-                    p.made { "An independent project, not affiliated with the Government of Canada. " a href="https://github.com/waleedrizwan/ontario-job-tracker" { "Source code" } }
+                    p.made { "An independent project, not affiliated with the Government of Canada. " a href="https://github.com/waleedrizwan/canada-job-tracker" { "Source code" } }
                 }
             }
         }
