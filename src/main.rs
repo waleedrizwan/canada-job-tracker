@@ -10,7 +10,9 @@ mod charts;
 mod data;
 mod fetch;
 mod query;
+mod regions;
 mod views;
+mod canada_map;
 
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
