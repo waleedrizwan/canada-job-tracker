@@ -14,6 +14,8 @@ pub struct Params {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub occ: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prov: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub city: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub level: Option<String>,
@@ -27,6 +29,9 @@ pub struct Params {
     pub month: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub src: Option<String>,
+    /// What the map is shaded by: postings per capita (default) or "wage".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub map: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sort: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -39,7 +44,7 @@ impl Params {
     /// Treats blank form fields as unset.
     pub fn normalize(mut self) -> Self {
         for f in [
-            &mut self.q, &mut self.cat, &mut self.occ, &mut self.city, &mut self.level, &mut self.hours, &mut self.term,
+            &mut self.q, &mut self.cat, &mut self.occ, &mut self.prov, &mut self.city, &mut self.map, &mut self.level, &mut self.hours, &mut self.term,
             &mut self.wage, &mut self.month, &mut self.src, &mut self.sort, &mut self.dir, &mut self.page,
         ] {
             if f.as_deref().is_some_and(|v| v.trim().is_empty()) {
@@ -118,8 +123,8 @@ pub fn filter<'a>(ds: &'a Dataset, p: &Params) -> Vec<&'a Job> {
     let hit = |d: &Dict| -> Option<Vec<bool>> { q.as_ref().map(|q| d.lower.iter().map(|v| v.contains(q.as_str())).collect()) };
     let (title_hit, occ_hit) = (hit(&ds.titles), hit(&ds.occupations));
 
-    let (cat, occ, city, level, hours, term, src) = (
-        sel(&ds.categories, &p.cat), sel(&ds.occupations, &p.occ), sel(&ds.cities, &p.city), sel(&ds.levels, &p.level),
+    let (cat, occ, prov, city, level, hours, term, src) = (
+        sel(&ds.categories, &p.cat), sel(&ds.occupations, &p.occ), sel(&ds.provinces, &p.prov), sel(&ds.cities, &p.city), sel(&ds.levels, &p.level),
         sel(&ds.hours, &p.hours), sel(&ds.terms, &p.term), sel(&ds.sources, &p.src),
     );
     let min_wage: Option<f32> = p.wage.as_deref().and_then(|w| w.parse().ok());
@@ -135,6 +140,7 @@ pub fn filter<'a>(ds: &'a Dataset, p: &Params) -> Vec<&'a Job> {
             }
             cat.ok(j.category as usize)
                 && occ.ok(j.occupation as usize)
+                && prov.ok(j.province as usize)
                 && city.ok(j.city as usize)
                 && level.ok(j.level as usize)
                 && hours.ok(j.hours as usize)
