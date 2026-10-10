@@ -1,4 +1,4 @@
-app = "ontario-job-tracker"
+app = "canada-job-tracker"
 primary_region = "yyz"  # Toronto
 
 [build]
