@@ -1,0 +1,12 @@
+{
+  "name": "ontario-job-tracker",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Dashboard for exploring Ontario job postings by category, pay, location and freshness.",
+  "type": "module",
+  "scripts": {
+    "dev": "python3 -m http.server 5173",
+    "sample": "node scripts/generate-sample.mjs",
+    "fetch": "node scripts/fetch-theirstack.mjs"
+  }
+}
