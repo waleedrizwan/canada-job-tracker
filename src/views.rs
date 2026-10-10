@@ -103,17 +103,9 @@ pub fn page(ds: &Dataset, p: &Params) -> Markup {
     let permanent = rows.iter().filter(|j| Some(j.term as usize) == permanent_id).count();
     let direct_id = ds.sources.find("Posted on Job Bank");
     let direct = rows.iter().filter(|j| Some(j.source as usize) == direct_id).count();
-    let kpis = [
-        ("Postings", thousands(n as u64), format!("of {} total", thousands(ds.jobs.len() as u64))),
-        ("Openings advertised", thousands(vacancies), "a single posting can hire several people".into()),
-        ("Median offered wage", med.map_or("–".into(), |m| format!("{}/h", wage(m))), med.map_or("no wage data".into(), annual)),
-        ("Full time", pct(full_time, n), "of postings".into()),
-        ("Permanent", pct(permanent, with_term), "of postings that state a term".into()),
-        ("Posted on Job Bank", pct(direct, n), "the rest come from partner boards".into()),
-    ];
 
     // ---- Bar charts by dimension
-    let count_tip = |label: &str, c: usize| format!("{label}\n{} postings · {}", thousands(c as u64), pct(c, n));
+    let count_tip = |label: &str, c: usize| format!("{label}\n{} postings ({} of the total)", thousands(c as u64), pct(c, n));
     let bars = |dict: &Dict, key: fn(&Job) -> usize, limit: usize, current: &Option<String>, set: Option<fn(&mut Params, &str)>| -> Vec<Bar> {
         count_by(&rows, dict, key)
             .into_iter()
@@ -264,140 +256,188 @@ pub fn page(ds: &Dataset, p: &Params) -> Markup {
     }
     let headers = [
         ("title", "Job title", false), ("occupation", "Occupation", false), ("city", "City", false), ("hours", "Hours", false),
-        ("term", "Term", false), ("wage", "Wage", true), ("vacancies", "Openings", true), ("posted", "Posted", false),
+        ("term", "Term", false), ("wage", "Hourly offer", true), ("vacancies", "Openings", true), ("posted", "Posted", false),
     ];
-    let as_of = format!("{} {}, {}", &MONTHS[ds.as_of.month0() as usize][..3], ds.as_of.day(), ds.as_of.year());
+    let more_open = p.q.is_some() || p.occ.is_some() || p.level.is_some() || p.hours.is_some() || p.term.is_some() || p.src.is_some();
+    let filtered_at_all = more_open || p.cat.is_some() || p.city.is_some() || p.wage.is_some() || p.month.is_some();
+    let span = match (ds.months.last(), ds.months.first()) {
+        (Some(a), Some(b)) if a != b => format!("{} to {}", a.split(' ').next().unwrap_or(a), b),
+        (_, Some(b)) => b.clone(),
+        _ => String::new(),
+    };
+    let updated = format!("{} {}, {}", MONTHS[ds.as_of.month0() as usize], ds.as_of.day(), ds.as_of.year());
 
     html! {
         (DOCTYPE)
-        html lang="en" {
+        html lang="en-CA" {
             head {
                 meta charset="utf-8";
                 meta name="viewport" content="width=device-width, initial-scale=1";
                 title { "Ontario Job Tracker" }
-                meta name="description" content="Explore job postings across Ontario by occupation, city and offered wage, using Government of Canada Job Bank open data and Statistics Canada vacancy estimates.";
+                meta name="description" content="Who's hiring in Ontario, for what, and what it pays. Every Ontario job posted on the Government of Canada's Job Bank, compared with Statistics Canada's vacancy survey.";
+                link rel="preconnect" href="https://fonts.googleapis.com";
+                link rel="preconnect" href="https://fonts.gstatic.com" crossorigin;
+                link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Next:ital,wght@0,400;0,500;0,700;0,800;1,400&display=swap";
                 link rel="stylesheet" href=(format!("/styles.css?v={}", crate::styles_version()));
             }
             body {
-                header.top {
-                    div {
-                        h1 { a href="/" { "Ontario Job Tracker" } }
-                        p.sub {
-                            (thousands(ds.jobs.len() as u64)) " postings across Ontario, "
-                            (ds.months.last().map_or("", String::as_str)) " to " (ds.months.first().map_or("", String::as_str))
-                            " · Government of Canada Job Bank · latest posting " (as_of)
-                        }
+                header.masthead {
+                    a.wordmark href="/" { "Ontario Job Tracker" }
+                    p.about {
+                        "Every Ontario job posted on Canada's Job Bank from " (span) ". Updated when the government publishes new data; latest posting " (updated) "."
                     }
                 }
 
-                form.filters method="get" action="/" aria-label="Filters" {
-                    label.f-search {
-                        span { "Search" }
-                        input type="search" name="q" placeholder="Job title or occupation" value=(p.q.as_deref().unwrap_or(""));
-                    }
-                    (select("cat", "Category", "All categories", &opts(&ds.categories, |j| j.category as usize, true), &p.cat))
-                    (select("occ", "Occupation", "All occupations", &opts(&ds.occupations, |j| j.occupation as usize, true), &p.occ))
-                    (select("city", "City", "All cities", &cities, &p.city))
-                    (select("level", "Skill level", "Any", &opts(&ds.levels, |j| j.level as usize, true), &p.level))
-                    (select("hours", "Hours", "Any", &opts(&ds.hours, |j| j.hours as usize, false), &p.hours))
-                    (select("term", "Term", "Any", &opts(&ds.terms, |j| j.term as usize, false), &p.term))
-                    label {
-                        span { "Min wage ($/h)" }
-                        input.num type="number" name="wage" min="0" max="300" step="1" placeholder="Any" value=(p.wage.as_deref().unwrap_or(""));
-                    }
-                    label {
-                        span { "Posted" }
-                        select name="month" {
-                            option value="" { "All months" }
-                            @for (v, name) in &months {
-                                option value=(v) selected[p.month.as_deref() == Some(v.as_str())] { (name) }
+                form.ask method="get" action="/" aria-label="Choose which jobs to show" {
+                    p.sentence {
+                        "Show me "
+                        label.field {
+                            span.sr { "Category" }
+                            select name="cat" {
+                                option value="" { "all kinds of" }
+                                @for o in &opts(&ds.categories, |j| j.category as usize, true) {
+                                    option value=(o) selected[p.cat.as_deref() == Some(o.as_str())] { (o.to_lowercase()) }
+                                }
                             }
                         }
+                        " jobs in "
+                        label.field {
+                            span.sr { "City" }
+                            select name="city" {
+                                option value="" { "all of Ontario" }
+                                @for o in &cities {
+                                    option value=(o) selected[p.city.as_deref() == Some(o.as_str())] { (o) }
+                                }
+                            }
+                        }
+                        " paying at least $"
+                        label.field.money {
+                            span.sr { "Minimum hourly wage" }
+                            input type="number" name="wage" min="0" max="300" step="1" placeholder="any" value=(p.wage.as_deref().unwrap_or(""));
+                        }
+                        " an hour, posted "
+                        label.field {
+                            span.sr { "Month posted" }
+                            select name="month" {
+                                option value="" { "any month" }
+                                @for (v, name) in &months {
+                                    option value=(v) selected[p.month.as_deref() == Some(v.as_str())] { "in " (name) }
+                                }
+                            }
+                        }
+                        "."
                     }
-                    (select("src", "Source", "All sources", &opts(&ds.sources, |j| j.source as usize, false), &p.src))
+                    details.more open[more_open] {
+                        summary { "More filters" }
+                        div.more-grid {
+                            label.stack {
+                                span { "Job title or occupation contains" }
+                                input type="search" name="q" placeholder="e.g. nurse, electrician" value=(p.q.as_deref().unwrap_or(""));
+                            }
+                            (select("occ", "Occupation", "Any occupation", &opts(&ds.occupations, |j| j.occupation as usize, true), &p.occ))
+                            (select("level", "Training needed", "Any", &opts(&ds.levels, |j| j.level as usize, true), &p.level))
+                            (select("hours", "Hours", "Any", &opts(&ds.hours, |j| j.hours as usize, false), &p.hours))
+                            (select("term", "Term", "Any", &opts(&ds.terms, |j| j.term as usize, false), &p.term))
+                            (select("src", "Advertised on", "Anywhere", &opts(&ds.sources, |j| j.source as usize, false), &p.src))
+                        }
+                    }
                     @if let Some(s) = &p.sort { input type="hidden" name="sort" value=(s); }
                     @if let Some(d) = &p.dir { input type="hidden" name="dir" value=(d); }
-                    div.actions {
-                        button.primary type="submit" { "Apply" }
-                        a.button.ghost href="/" { "Reset" }
+                    div.ask-actions {
+                        button type="submit" { "Show jobs" }
+                        @if filtered_at_all { a.start-over href="/" { "Start over" } }
                     }
                 }
 
-                section.kpis aria-label="Summary" {
-                    @for (label, value, note) in &kpis {
-                        div.kpi { div.label { (label) } div.value { (value) } div.note { (note) } }
+                section.answer aria-live="polite" {
+                    @if n == 0 {
+                        p { "No postings match. Try a lower minimum wage, a different month, or all of Ontario." }
+                    } @else {
+                        p.lead {
+                            strong { (thousands(n as u64)) } (if n == 1 { " posting" } else { " postings" }) " for "
+                            strong { (thousands(vacancies)) } (if vacancies == 1 { " opening" } else { " openings" }) "."
+                            @if let Some(m) = med {
+                                " Half offer more than " strong { (wage(m)) " an hour" } ", or about $" (thousands(((m * HOURS_PER_YEAR) / 1000.0).round() as u64 * 1000)) " a year full time."
+                            }
+                        }
+                        p.detail {
+                            (pct(full_time, n)) " are full time"
+                            @if with_term > 0 { ", and " (pct(permanent, with_term)) " of those that state a term are permanent" }
+                            ". " (pct(direct, n)) " were posted directly on Job Bank; the rest were copied from partner job boards."
+                        }
                     }
                 }
 
-                main.grid {
-                    article.card {
-                        h2 { "Postings by category" }
-                        p.hint { "NOC 2021 broad occupational category · click a bar to filter" }
-                        div.chart { (charts::hbar(&by_category, "Postings by category")) }
+                main.charts {
+                    section.chart-block {
+                        h2 { "What kind of work?" }
+                        p.hint { "Click a bar to see only that kind of job." }
+                        (charts::hbar(&by_category, "Postings by category"))
                     }
-                    article.card {
-                        h2 { "Median offered wage by category" }
-                        p.hint { "Hourly, midpoint of the posted range · click a bar to filter" }
-                        div.chart { (charts::hbar(&wage_bars, "Median offered wage by category")) }
+                    section.chart-block {
+                        h2 { "What does it pay?" }
+                        p.hint { "Median hourly offer in each field, using the middle of each posted range." }
+                        (charts::hbar(&wage_bars, "Median offered wage by category"))
                     }
-                    article.card {
-                        h2 { "Most-posted occupations" }
-                        p.hint { "Top 12 NOC unit groups · click a bar to filter" }
-                        div.chart { (charts::hbar(&by_occupation, "Most-posted occupations")) }
+                    section.chart-block {
+                        h2 { "Which jobs come up most?" }
+                        p.hint { "The 12 most-posted occupations." }
+                        (charts::hbar(&by_occupation, "Most-posted occupations"))
                     }
-                    article.card {
-                        h2 { "Postings by city" }
-                        p.hint { "Top 12 · click a bar to filter" }
-                        div.chart { (charts::hbar(&by_city, "Postings by city")) }
+                    section.chart-block {
+                        h2 { "Where?" }
+                        p.hint { "The 12 places with the most postings." }
+                        (charts::hbar(&by_city, "Postings by city"))
                     }
-                    article.card {
-                        h2 { "Offered wage distribution" }
-                        p.hint { "Hourly midpoint, $2 bins · hover a bar for counts" }
-                        div.chart { (charts::vbar(&wage_bins, 4, "Offered wage distribution")) }
+                    section.chart-block {
+                        h2 { "How is pay spread out?" }
+                        p.hint { "Number of postings at each hourly offer, in $2 steps. Hover a bar for the count." }
+                        (charts::vbar(&wage_bins, 4, "Offered wage distribution"))
                     }
-                    article.card {
-                        h2 { "New postings per week" }
-                        p.hint { "By first posting date" }
-                        div.chart { (charts::vbar(&week_bins, week_every, "New postings per week")) }
+                    section.chart-block {
+                        h2 { "When were they posted?" }
+                        p.hint { "New postings each week." }
+                        (charts::vbar(&week_bins, week_every, "New postings per week"))
                     }
-                    article.card {
-                        h2 { "Skill level required" }
-                        p.hint { "NOC TEER category · click a bar to filter" }
-                        div.chart { (charts::hbar(&by_level, "Skill level required")) }
+                    section.chart-block {
+                        h2 { "How much training do they ask for?" }
+                        p.hint { "Training, education and experience levels (TEER) from Canada's occupation system." }
+                        (charts::hbar(&by_level, "Training required"))
                     }
-                    article.card {
-                        h2 { "Where postings come from" }
-                        p.hint { "Job Bank also republishes postings from partner job boards · click a bar to filter" }
-                        div.chart { (charts::hbar(&by_source, "Posting source")) }
+                    section.chart-block {
+                        h2 { "Where were they advertised?" }
+                        p.hint { "Job Bank also republishes postings from partner job boards." }
+                        (charts::hbar(&by_source, "Where postings were advertised"))
                     }
                     @if let Some(b) = &ds.benchmark {
-                        article.card.wide {
-                            h2 { "Postings vs. estimated vacancies" }
+                        section.chart-block.wide {
+                            h2 { "What Job Bank misses" }
                             p.hint {
-                                "Share of the Ontario total in each category · StatCan estimates for " (b.period) " ("
-                                (thousands(b.by_category.get("Total").and_then(|t| t.vacancies).unwrap_or(0.0) as u64)) " vacancies)"
+                                "Each field's share of Job Bank postings, next to its share of the "
+                                (thousands(b.by_category.get("Total").and_then(|t| t.vacancies).unwrap_or(0.0) as u64))
+                                " jobs Ontario employers told Statistics Canada they were trying to fill in " (b.period) "."
                             }
-                            div.chart { (charts::hbar_pair(&pairs, ["Job Bank postings", &format!("StatCan vacancies, {}", b.period)], pct1, "Job Bank postings vs StatCan vacancies")) }
-                            p.note-box {
-                                "Statistics Canada surveys employers for the number of jobs they are actively trying to fill, whether or not those jobs are advertised. "
-                                "Where Job Bank's share is higher than StatCan's, Job Bank over-represents that kind of work. Where it's lower, most of those openings are "
-                                "advertised elsewhere or filled without a public posting. This chart reflects all Ontario postings in the selected month and ignores the other filters."
+                            (charts::hbar_pair(&pairs, ["Job Bank postings", &format!("StatCan vacancies, {}", b.period)], pct1, "Job Bank postings vs StatCan vacancies"))
+                            p.note {
+                                "Where the green bar is longer, Job Bank over-represents that work. Where it's shorter, most of those jobs are advertised elsewhere or filled without a public posting. "
+                                "This comparison covers all of Ontario for the chosen month and ignores the other filters."
                             }
                         }
                     }
                 }
 
-                section.card.table-card {
-                    div.table-head {
-                        h2 { "Postings " span.muted { "· " (thousands(n as u64)) } }
-                        a.button.ghost href=(export_link) { "Export CSV" }
+                section.listing {
+                    div.listing-head {
+                        h2 { "The postings" }
+                        a.download href=(export_link) download { "Download these " (thousands(n as u64)) " as a spreadsheet (CSV)" }
                     }
                     div.table-wrap {
                         table {
                             thead { tr {
                                 @for (key, label, num) in headers {
                                     @let active = p.sort_key() == key;
-                                    th class=(format!("{}{}", if num { "num " } else { "" }, if active { if p.descending() { "sorted" } else { "sorted asc" } } else { "" })) {
+                                    th class=(format!("{}{}", if num { "num " } else { "" }, if active { if p.descending() { "sorted" } else { "sorted asc" } } else { "" }))
+                                        aria-sort=(if active { if p.descending() { "descending" } else { "ascending" } } else { "none" }) {
                                         a href=(sort_link(key)) { (label) }
                                     }
                                 }
@@ -410,50 +450,53 @@ pub fn page(ds: &Dataset, p: &Params) -> Markup {
                                     @let search = format!("https://www.jobbank.gc.ca/jobsearch/jobsearch?{}",
                                         serde_urlencoded::to_string([("searchstring", title), ("locationstring", loc.as_str())]).unwrap_or_default());
                                     tr {
-                                        td.title { a href=(search) target="_blank" rel="noopener" title="Search Job Bank for current postings like this" { (title) } }
+                                        td.title { a href=(search) target="_blank" rel="noopener" title="Find current postings like this on Job Bank" { (title) } }
                                         td { (ds.occupations.get(j.occupation as usize)) }
-                                        td { (city) }
+                                        td { (if city == "Unspecified" { "Not given" } else { city }) }
                                         td { (ds.hours.get(j.hours as usize)) }
                                         td { (ds.terms.get(j.term as usize)) }
                                         td.num {
                                             @match (j.wage_min, j.wage_max) {
                                                 (Some(a), Some(b)) if a != b => { (wage_short(a)) "–" (wage_short(b)) }
                                                 (Some(a), _) => { (wage_short(a)) }
-                                                _ => { "–" }
+                                                _ => { "Not given" }
                                             }
                                         }
                                         td.num { (j.vacancies) }
-                                        td { (j.posted) }
+                                        td.date { (format!("{} {}", &MONTHS[j.posted.month0() as usize][..3], j.posted.day())) }
                                     }
                                 }
                                 @if slice.is_empty() {
-                                    tr { td.muted colspan="8" { "No postings match these filters" } }
+                                    tr { td.empty-row colspan="8" { "No postings match these filters." } }
                                 }
                             }
                         }
                     }
                     nav.pager aria-label="Pages" {
-                        @if cur > 1 { a.button.ghost href=(page_link(cur - 1)) { "‹ Prev" } } @else { span.button.ghost.disabled { "‹ Prev" } }
-                        span { "Page " (thousands(cur as u64)) " of " (thousands(pages as u64)) }
-                        @if cur < pages { a.button.ghost href=(page_link(cur + 1)) { "Next ›" } } @else { span.button.ghost.disabled { "Next ›" } }
+                        @if cur > 1 { a href=(page_link(cur - 1)) rel="prev" { "Previous 25" } } @else { span {} }
+                        span.where { "Page " (thousands(cur as u64)) " of " (thousands(pages as u64)) }
+                        @if cur < pages { a href=(page_link(cur + 1)) rel="next" { "Next 25" } } @else { span {} }
                     }
                 }
 
-                footer.foot {
-                    p {
-                        strong { "Sources. " }
-                        "Postings come from " a href=(ds.source_url) target="_blank" rel="noopener" { "Job Postings Advertised on Canada's National Job Bank" }
-                        " (Employment and Social Development Canada, Open Government Licence – Canada). Vacancy estimates come from Statistics Canada's "
-                        a href="https://www150.statcan.gc.ca/t1/tbl1/en/tv.action?pid=1410044401" target="_blank" rel="noopener" { "Job Vacancy and Wage Survey, table 14-10-0444-01" }
-                        ". The data refreshes automatically when new releases come out."
+                footer.colophon {
+                    div {
+                        h3 { "Where this comes from" }
+                        p {
+                            "Postings: " a href=(ds.source_url) target="_blank" rel="noopener" { "Job Postings Advertised on Canada's National Job Bank" }
+                            ", Employment and Social Development Canada, under the Open Government Licence – Canada. "
+                            "Vacancy estimates: " a href="https://www150.statcan.gc.ca/t1/tbl1/en/tv.action?pid=1410044401" target="_blank" rel="noopener" { "Statistics Canada, Job Vacancy and Wage Survey, table 14-10-0444-01" } "."
+                        }
                     }
-                    p {
-                        strong { "Caveats. " }
-                        "Job Bank captures only part of the market. It over-represents employers hiring through the Temporary Foreign Worker program "
-                        "(who must advertise there) and under-represents professional and tech roles. The data has no employer names and doesn't record when a job was filled. "
-                        "Wages are converted to hourly at 40 hours a week unless the posting gives its hours. Toronto includes North York, Etobicoke, Scarborough, York and East York."
+                    div {
+                        h3 { "What to keep in mind" }
+                        p {
+                            "Job Bank is one slice of the market. Employers hiring through the Temporary Foreign Worker program must advertise there, so food service, caregiving and trades show up more, and office and tech jobs less. "
+                            "Employer names and closing dates aren't published. Wages are converted to hourly at 40 hours a week unless the posting says otherwise. "
+                            "Toronto includes North York, Etobicoke, Scarborough, York and East York."
+                        }
                     }
-                    p { "Built in Rust. No JavaScript. " a href="https://github.com/waleedrizwan/ontario-job-tracker" { "Source code" } }
+                    p.made { "An independent project, not affiliated with the Government of Canada. " a href="https://github.com/waleedrizwan/ontario-job-tracker" { "Source code" } }
                 }
             }
         }
