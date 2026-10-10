@@ -1,8 +1,8 @@
 [package]
-name = "ontario-job-tracker"
+name = "canada-job-tracker"
 version = "0.2.0"
 edition = "2024"
-description = "Server-rendered dashboard of Ontario job postings from Job Bank open data and StatCan vacancy estimates"
+description = "Server-rendered dashboard of Canadian job postings from Job Bank open data and StatCan vacancy estimates"
 license = "MIT"
 
 [dependencies]

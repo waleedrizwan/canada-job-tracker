@@ -166,6 +166,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 
 [[package]]
+name = "canada-job-tracker"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "chrono",
+ "encoding_rs",
+ "maud",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "serde_urlencoded",
+ "tokio",
+ "tower-http",
+]
+
+[[package]]
 name = "cc"
 version = "1.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -745,23 +762,6 @@ name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
-
-[[package]]
-name = "ontario-job-tracker"
-version = "0.2.0"
-dependencies = [
- "anyhow",
- "axum",
- "chrono",
- "encoding_rs",
- "maud",
- "reqwest",
- "serde",
- "serde_json",
- "serde_urlencoded",
- "tokio",
- "tower-http",
-]
 
 [[package]]
 name = "percent-encoding"

@@ -1,7 +1,7 @@
-//! Ontario Job Tracker: a server-rendered dashboard of Ontario job postings.
+//! Canada Job Tracker: a server-rendered dashboard of Canadian job postings.
 //!
-//!   ontario-job-tracker          serve the dashboard (PORT, default 8080)
-//!   ontario-job-tracker fetch    download fresh data into DATA_PATH and exit
+//!   canada-job-tracker           serve the dashboard (PORT, default 8080)
+//!   canada-job-tracker fetch     download fresh data into DATA_PATH and exit
 //!
 //! Env: DATA_PATH (default data/jobs.json), MONTHS (Job Bank months to keep, default 3),
 //! REFRESH_HOURS (how often the server checks for new releases, default 6; 0 disables).

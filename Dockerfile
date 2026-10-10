@@ -8,8 +8,8 @@ RUN cargo build --release --locked
 # Distroless: just glibc and CA certs, no shell or package manager.
 FROM gcr.io/distroless/cc-debian12
 WORKDIR /app
-COPY --from=build /app/target/release/ontario-job-tracker /app/ontario-job-tracker
+COPY --from=build /app/target/release/canada-job-tracker /app/canada-job-tracker
 COPY data /app/data
 ENV PORT=8080
 EXPOSE 8080
-CMD ["/app/ontario-job-tracker"]
+CMD ["/app/canada-job-tracker"]
