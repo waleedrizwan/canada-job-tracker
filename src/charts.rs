@@ -158,3 +158,126 @@ pub fn hbar_pair(rows: &[Pair], names: [&str; 2], fmt: fn(f64) -> String, aria: 
         }
     }
 }
+
+/// Number of colour steps on the map and heat grid.
+pub const STEPS: usize = 5;
+
+/// Quantile bins: each colour step holds about the same number of values, so one
+/// outlier can't wash everything else into the lightest step.
+pub struct Bins {
+    edges: Vec<f64>,
+}
+
+impl Bins {
+    pub fn new(values: impl Iterator<Item = f64>) -> Self {
+        let mut v: Vec<f64> = values.filter(|x| x.is_finite()).collect();
+        v.sort_by(f64::total_cmp);
+        if v.is_empty() {
+            return Bins { edges: Vec::new() };
+        }
+        let n = v.len();
+        let mut edges: Vec<f64> = (0..=STEPS).map(|k| v[(k * n / STEPS).min(n - 1)]).collect();
+        edges[STEPS] = v[n - 1];
+        Bins { edges }
+    }
+
+    pub fn step(&self, v: f64) -> usize {
+        if self.edges.is_empty() {
+            return STEPS / 2;
+        }
+        (1..STEPS).filter(|&k| v >= self.edges[k]).count()
+    }
+
+    /// One label per step, e.g. "$17–$24".
+    pub fn labels(&self, fmt: impl Fn(f64) -> String) -> Vec<String> {
+        if self.edges.is_empty() {
+            return Vec::new();
+        }
+        (0..STEPS).map(|k| format!("{}–{}", fmt(self.edges[k]), fmt(self.edges[k + 1]))).collect()
+    }
+}
+
+pub struct Region {
+    pub code: &'static str,
+    pub step: Option<usize>,
+    pub tip: String,
+    pub href: String,
+    pub active: bool,
+}
+
+/// Map label anchors, placed by eye. The three Maritime provinces are too small to label.
+const LABELS: [(&str, f64, f64); 10] = [
+    ("BC", 76.0, 470.0), ("AB", 152.0, 520.0), ("SK", 271.0, 515.0), ("MB", 332.0, 520.0), ("ON", 470.0, 625.0),
+    ("QC", 590.0, 545.0), ("NL", 700.0, 478.0), ("NU", 382.0, 300.0), ("NT", 192.0, 335.0), ("YT", 122.0, 300.0),
+];
+
+/// Choropleth of Canada. Each province is a link; hover shows its numbers.
+pub fn canada_map(regions: &[Region], aria: &str) -> Markup {
+    use crate::canada_map::{PROVINCES, VIEW_H, VIEW_W};
+    let find = |code: &str| regions.iter().find(|r| r.code == code);
+    html! {
+        svg.map viewBox=(format!("0 0 {VIEW_W} {VIEW_H}")) role="img" aria-label=(aria) {
+            @for (code, d, _, _) in PROVINCES {
+                @if let Some(r) = find(code) {
+                    a href=(r.href) {
+                        title { (r.tip) }
+                        path class=(format!("region {}{}", r.step.map_or("nodata".to_string(), |s| format!("q{s}")), if r.active { " active" } else { "" })) d=(d) {}
+                    }
+                }
+            }
+            @for (code, x, y) in LABELS {
+                @let dark = find(code).and_then(|r| r.step).is_some_and(|s| s >= 3);
+                text class=(if dark { "map-label on-dark" } else { "map-label" }) x=(x) y=(y) text-anchor="middle" { (code) }
+            }
+        }
+    }
+}
+
+pub struct HeatCell {
+    pub step: Option<usize>,
+    pub display: String,
+    pub tip: String,
+    pub href: String,
+}
+
+/// A grid of linked cells shaded by value: rows × columns.
+pub fn heat_grid(cols: &[(&str, &str)], rows: &[(String, Vec<HeatCell>)], aria: &str) -> Markup {
+    html! {
+        div.heat-wrap {
+            table.heat aria-label=(aria) {
+                thead { tr {
+                    th {}
+                    @for (code, name) in cols { th scope="col" title=(name) { abbr title=(name) { (code) } } }
+                } }
+                tbody {
+                    @for (label, cells) in rows {
+                        tr {
+                            th scope="row" { (label) }
+                            @for c in cells {
+                                td class=(c.step.map_or("nodata".to_string(), |s| format!("q{s}"))) {
+                                    @if c.step.is_some() {
+                                        a href=(c.href) title=(c.tip) { (c.display) }
+                                    } @else {
+                                        span title=(c.tip) { "–" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Legend for the shared colour steps.
+pub fn steps_legend(labels: &[String]) -> Markup {
+    html! {
+        div.steps-legend {
+            @for (i, l) in labels.iter().enumerate() {
+                span { span class=(format!("swatch q{i}")) {} (l) }
+            }
+            span { span.swatch.nodata {} "Too few postings" }
+        }
+    }
+}
