@@ -1,9 +1,10 @@
 //! Downloads the official sources and builds a `RawFile`:
 //!
 //! 1. Job Bank open data (ESDC): every posting advertised on Canada's National Job Bank,
-//!    published monthly on open.canada.ca. Ontario rows from the latest `months` files are kept.
-//! 2. StatCan Job Vacancy and Wage Survey, table 14-10-0444: estimated Ontario vacancies and
-//!    average offered hourly wage by broad occupational category, as a benchmark.
+//!    published monthly on open.canada.ca, from the latest `months` files.
+//! 2. StatCan Job Vacancy and Wage Survey, table 14-10-0444: estimated vacancies and average
+//!    offered hourly wage by region and broad occupational category, as a benchmark.
+//! 3. StatCan population estimates, table 17-10-0009, for per-capita rates on the map.
 //!
 //! The Job Bank files are ~45 MB of UTF-16 each; they're decoded and parsed as they stream in,
 //! so memory stays flat regardless of file size.
@@ -14,6 +15,7 @@ use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 
 use crate::data::{BenchEntry, Benchmark, COLS, DICT_COLS, RawFile, RawRow};
+use crate::regions::{self, REGIONS};
 
 const DATASET: &str = "ea639e28-c0fc-48bf-b5dd-b8899bd43072";
 const HOURS_PER_YEAR: f64 = 2080.0;
@@ -99,21 +101,13 @@ impl Interner {
     }
 }
 
-/// A parsed posting before string interning.
-struct Posting {
-    id: String,
-    title: String,
-    occupation: String,
-    category: &'static str,
-    level: &'static str,
-    city: String,
-    hours: String,
-    term: String,
-    wage_min: Option<f32>,
-    wage_max: Option<f32>,
-    posted: String,
-    vacancies: u32,
-    source: &'static str,
+/// Distinct values for each text column; rows refer to them by index.
+#[derive(Default)]
+struct Dicts(HashMap<&'static str, Interner>);
+impl Dicts {
+    fn id(&mut self, col: &'static str, v: &str) -> u32 {
+        self.0.entry(col).or_default().id(v)
+    }
 }
 
 fn na(v: Option<&str>) -> Option<&str> {
@@ -156,11 +150,10 @@ impl Columns {
     }
 }
 
-fn parse_line(cols: &Columns, line: &str) -> Option<Posting> {
+/// Parses one Job Bank row straight into the compact on-disk form.
+fn parse_line(cols: &Columns, line: &str, d: &mut Dicts) -> Option<RawRow> {
     let f: Vec<&str> = line.split('\t').collect();
-    if cols.get(&f, "Province/Territory")? != "Ontario" {
-        return None;
-    }
+    let region = regions::by_job_bank_name(cols.get(&f, "Province/Territory")?)?;
     let g = |name: &str| cols.get(&f, name);
     let noc = g("NOC21 Code").unwrap_or("");
     let digit = |i: usize| noc.as_bytes().get(i).filter(|b| b.is_ascii_digit()).map(|b| (b - b'0') as usize);
@@ -173,36 +166,44 @@ fn parse_line(cols: &Columns, line: &str) -> Option<Posting> {
         (Some(l), Some(h)) if h < l => Some(l),
         _ => hi,
     };
-    let mut city = g("City").unwrap_or("Unspecified").to_string();
-    if TORONTO.contains(&city.as_str()) {
-        city = "Toronto".into();
-    }
+    let posted = g("First Posting Date")?.replace('/', "-");
+    // Cities carry their province ("Richmond, BC") so same-named places stay apart.
+    let city = match g("City") {
+        Some(c) if region.code == "ON" && TORONTO.contains(&c) => d.id("city", "Toronto, ON"),
+        Some(c) => d.id("city", &format!("{c}, {}", region.code)),
+        None => d.id("city", "Not given"),
+    };
     let hours = match g("Employment Type") {
-        Some(t) if t.starts_with("Part time leading") => "Part time → full time".to_string(),
-        Some(t) => t.to_string(),
-        None => "Unspecified".into(),
+        Some(t) if t.starts_with("Part time leading") => "Part time → full time",
+        Some(t) => t,
+        None => "Unspecified",
     };
     let term = g("Employment Term").unwrap_or("Unspecified");
+    let title = match g("Original Job Title") {
+        Some(t) => d.id("title", t),
+        None => d.id("title", &title_case(g("Job Title").unwrap_or("Untitled"))),
+    };
 
-    Some(Posting {
-        id: g("WIC Job Location Snapshot ID").unwrap_or("0").to_string(),
-        title: g("Original Job Title").map(str::to_string).unwrap_or_else(|| title_case(g("Job Title").unwrap_or("Untitled"))),
-        occupation: g("NOC21 Code Name").unwrap_or("Unclassified").to_string(),
-        category: digit(0).map_or("Unclassified", |d| BROAD[d]),
-        level: digit(1).and_then(|d| TEER.get(d).copied()).unwrap_or("Unclassified"),
+    Some((
+        g("WIC Job Location Snapshot ID").and_then(|v| v.parse().ok()).unwrap_or(0),
+        title,
+        d.id("occupation", g("NOC21 Code Name").unwrap_or("Unclassified")),
+        d.id("category", digit(0).map_or("Unclassified", |n| BROAD[n])),
+        d.id("level", digit(1).and_then(|n| TEER.get(n).copied()).unwrap_or("Unclassified")),
         city,
-        hours,
-        term: term.strip_suffix(" employment").unwrap_or(term).to_string(),
-        wage_min: lo,
-        wage_max: hi,
-        posted: g("First Posting Date")?.replace('/', "-"),
-        vacancies: g("Vacancy Count").and_then(|v| v.parse().ok()).filter(|&v| v > 0).unwrap_or(1),
-        source: if g("External Indicator") == Some("1") { "Partner job boards" } else { "Posted on Job Bank" },
-    })
+        d.id("province", region.code),
+        d.id("employmentType", hours),
+        d.id("term", term.strip_suffix(" employment").unwrap_or(term)),
+        lo,
+        hi,
+        posted,
+        g("Vacancy Count").and_then(|v| v.parse().ok()).filter(|&v| v > 0).unwrap_or(1),
+        d.id("source", if g("External Indicator") == Some("1") { "Partner job boards" } else { "Posted on Job Bank" }),
+    ))
 }
 
-/// Streams one monthly file, returning its Ontario postings.
-async fn load_month(file: &MonthFile) -> Result<Vec<Posting>> {
+/// Streams one monthly file, returning its postings.
+async fn load_month(file: &MonthFile, dicts: &mut Dicts) -> Result<Vec<RawRow>> {
     let mut resp = client().get(&file.url).send().await?.error_for_status()?;
     // BOM sniffing picks UTF-16LE; the files are tab-separated with no quoting.
     let mut decoder = encoding_rs::UTF_16LE.new_decoder();
@@ -218,7 +219,7 @@ async fn load_month(file: &MonthFile) -> Result<Vec<Posting>> {
                 *cols = Some(Columns(header.collect()));
             }
             Some(c) => {
-                if let Some(p) = parse_line(c, line) {
+                if let Some(p) = parse_line(c, line, dicts) {
                     out.push(p);
                 }
             }
@@ -250,54 +251,94 @@ async fn load_month(file: &MonthFile) -> Result<Vec<Posting>> {
     Ok(out)
 }
 
-/// StatCan JVWS table 14-10-0444: latest quarter, Ontario, by broad category.
+/// Fetches StatCan series in batches (the API takes a list of table/coordinate pairs).
+async fn statcan(coords: &[(u32, String)]) -> Result<Vec<Value>> {
+    let mut out = Vec::new();
+    for chunk in coords.chunks(100) {
+        let body: Vec<Value> = chunk.iter().map(|(pid, c)| json!({ "productId": pid, "coordinate": c, "latestN": 1 })).collect();
+        let data: Vec<Value> = client()
+            .post("https://www150.statcan.gc.ca/t1/wds/rest/getDataFromCubePidCoordAndLatestNPeriods")
+            .json(&body)
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
+        out.extend(data);
+    }
+    Ok(out)
+}
+
+fn quarter(ref_per: &str) -> String {
+    let year = ref_per.get(..4).unwrap_or("?");
+    let month = ref_per.get(5..7).and_then(|m| m.parse::<u32>().ok()).unwrap_or(1);
+    format!("Q{} {year}", (month - 1) / 3 + 1)
+}
+
+/// StatCan JVWS (table 14-10-0444) for Canada and each province/territory by broad category,
+/// plus the latest population estimates (table 17-10-0009).
 pub async fn benchmark() -> Result<Benchmark> {
-    const PID: u32 = 14100444;
-    const ONTARIO: u32 = 7;
+    const JVWS: u32 = 14100444;
+    const POP: u32 = 17100009;
     const VACANCIES: u32 = 1;
     const WAGE: u32 = 5;
-    // NOC member 1 is the total; members 2..=11 are broad categories 0..=9.
-    let body: Vec<Value> = (1..=11)
-        .flat_map(|m| {
-            [VACANCIES, WAGE].map(|s| json!({ "productId": PID, "coordinate": format!("{ONTARIO}.{m}.{s}.0.0.0.0.0.0.0"), "latestN": 1 }))
-        })
-        .collect();
-    let data: Vec<Value> = client()
-        .post("https://www150.statcan.gc.ca/t1/wds/rest/getDataFromCubePidCoordAndLatestNPeriods")
-        .json(&body)
-        .send()
-        .await?
-        .error_for_status()?
-        .json()
-        .await?;
+    let geos: Vec<(&str, u32, u32)> = std::iter::once(("CA", 1, 1)).chain(REGIONS.iter().map(|r| (r.code, r.jvws_geo, r.pop_geo))).collect();
 
-    let mut by_category: HashMap<String, BenchEntry> = HashMap::new();
-    let mut ref_per = String::new();
+    // NOC member 1 is the total; members 2..=11 are broad categories 0..=9.
+    let mut coords: Vec<(u32, String)> = Vec::new();
+    for (_, g, _) in &geos {
+        for m in 1..=11 {
+            for s in [VACANCIES, WAGE] {
+                coords.push((JVWS, format!("{g}.{m}.{s}.0.0.0.0.0.0.0")));
+            }
+        }
+    }
+    for (_, _, pg) in &geos {
+        coords.push((POP, format!("{pg}.0.0.0.0.0.0.0.0.0")));
+    }
+    let data = statcan(&coords).await?;
+
+    let mut by_region: HashMap<String, HashMap<String, BenchEntry>> = HashMap::new();
+    let mut population: HashMap<String, f64> = HashMap::new();
+    let (mut period, mut pop_period) = (String::new(), String::new());
     for item in &data {
         if item["status"] != "SUCCESS" {
             continue;
         }
         let obj = &item["object"];
+        let pid = obj["productId"].as_u64().unwrap_or(0) as u32;
         let coord: Vec<u32> = obj["coordinate"].as_str().unwrap_or("").split('.').filter_map(|p| p.parse().ok()).collect();
-        let (Some(&m), Some(&s)) = (coord.get(1), coord.get(2)) else { continue };
         let Some(point) = obj["vectorDataPoint"].get(0) else { continue };
-        ref_per = point["refPer"].as_str().unwrap_or("").to_string();
+        let ref_per = point["refPer"].as_str().unwrap_or("").to_string();
+        let value = point["value"].as_f64();
+        if pid == POP {
+            let Some(&(code, _, _)) = geos.iter().find(|(_, _, pg)| Some(pg) == coord.first()) else { continue };
+            if let Some(v) = value {
+                population.insert(code.to_string(), v);
+            }
+            pop_period = ref_per;
+            continue;
+        }
+        let (Some(&g), Some(&m), Some(&s)) = (coord.first(), coord.get(1), coord.get(2)) else { continue };
+        let Some(&(code, _, _)) = geos.iter().find(|(_, jg, _)| *jg == g) else { continue };
+        period = ref_per;
         let label = if m == 1 { "Total" } else { BROAD[(m - 2) as usize] };
-        let e = by_category.entry(label.to_string()).or_default();
+        let e = by_region.entry(code.to_string()).or_default().entry(label.to_string()).or_default();
         if s == VACANCIES {
-            e.vacancies = point["value"].as_f64();
+            e.vacancies = value;
         } else {
-            e.wage = point["value"].as_f64();
+            e.wage = value;
         }
     }
-    if by_category.is_empty() {
+    if by_region.is_empty() {
         bail!("StatCan returned no data");
     }
-    let (year, month) = (ref_per.get(..4).unwrap_or("?"), ref_per.get(5..7).and_then(|m| m.parse::<u32>().ok()).unwrap_or(1));
     Ok(Benchmark {
-        source: "Statistics Canada, Job Vacancy and Wage Survey, table 14-10-0444-01".into(),
-        period: format!("Q{} {year}", (month - 1) / 3 + 1),
-        by_category,
+        source: "Statistics Canada, Job Vacancy and Wage Survey, table 14-10-0444-01; population estimates, table 17-10-0009-01".into(),
+        period: quarter(&period),
+        by_region,
+        population,
+        population_period: quarter(&pop_period),
     })
 }
 
@@ -307,51 +348,35 @@ pub async fn fetch_all(months: usize) -> Result<RawFile> {
     if files.is_empty() {
         bail!("no Job Bank files found");
     }
-    let mut postings = Vec::new();
+    let mut dicts = Dicts::default();
+    let mut rows: Vec<RawRow> = Vec::new();
     for f in &files {
-        let rows = load_month(f).await.with_context(|| format!("loading {}", f.name))?;
-        eprintln!("  {}: {} Ontario postings", f.name, rows.len());
-        postings.extend(rows);
+        let month = load_month(f, &mut dicts).await.with_context(|| format!("loading {}", f.name))?;
+        eprintln!("  {}: {} postings", f.name, month.len());
+        rows.extend(month);
     }
-    postings.sort_by(|a, b| b.posted.cmp(&a.posted));
+    rows.sort_by(|a, b| b.11.cmp(&a.11));
 
     let bench = benchmark().await;
     match &bench {
-        Ok(b) => eprintln!("  StatCan JVWS {}: {:.0} Ontario vacancies", b.period, b.by_category.get("Total").and_then(|t| t.vacancies).unwrap_or(0.0)),
+        Ok(b) => eprintln!(
+            "  StatCan JVWS {}: {:.0} vacancies in Canada; population for {} regions ({})",
+            b.period,
+            b.by_region.get("CA").and_then(|c| c.get("Total")).and_then(|t| t.vacancies).unwrap_or(0.0),
+            b.population.len(),
+            b.population_period
+        ),
         Err(e) => eprintln!("  StatCan benchmark unavailable: {e:#}"),
     }
 
-    let mut dicts: HashMap<&str, Interner> = DICT_COLS.iter().map(|&c| (c, Interner::default())).collect();
-    let mut id = |col: &str, v: &str| dicts.get_mut(col).unwrap().id(v);
-    let rows: Vec<RawRow> = postings
-        .iter()
-        .map(|p| {
-            (
-                p.id.clone(),
-                id("title", &p.title),
-                id("occupation", &p.occupation),
-                id("category", p.category),
-                id("level", p.level),
-                id("city", &p.city),
-                id("employmentType", &p.hours),
-                id("term", &p.term),
-                p.wage_min,
-                p.wage_max,
-                p.posted.clone(),
-                p.vacancies,
-                id("source", p.source),
-            )
-        })
-        .collect();
-
     Ok(RawFile {
-        as_of: postings.first().map(|p| p.posted.clone()).unwrap_or_default(),
+        as_of: rows.first().map(|r| r.11.clone()).unwrap_or_default(),
         source: "Job Bank open data (Government of Canada)".into(),
         source_url: format!("https://open.canada.ca/data/en/dataset/{DATASET}"),
         months: files.into_iter().map(|f| f.name).collect(),
         benchmark: bench.ok(),
         cols: COLS.iter().map(|s| s.to_string()).collect(),
-        dicts: dicts.into_iter().map(|(k, v)| (k.to_string(), v.values)).collect(),
+        dicts: DICT_COLS.iter().map(|&c| (c.to_string(), dicts.0.remove(c).unwrap_or_default().values)).collect(),
         rows,
     })
 }
