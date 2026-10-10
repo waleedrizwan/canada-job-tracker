@@ -10,6 +10,8 @@
   --accent: #2a78d6;
   --accent-soft: #86b6ef;
   --accent-hover: #1c5cab;
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
   --warn-bg: #fff4d6;
   --warn-text: #6b4a00;
   --radius: 10px;
@@ -27,6 +29,8 @@
     --accent: #3987e5;
     --accent-soft: #184f95;
     --accent-hover: #6da7ec;
+    --series-1: #3987e5;
+    --series-2: #d95926;
     --warn-bg: #3a2f12;
     --warn-text: #f3d79a;
   }
@@ -43,6 +47,8 @@
   --accent: #3987e5;
   --accent-soft: #184f95;
   --accent-hover: #6da7ec;
+  --series-1: #3987e5;
+  --series-2: #d95926;
   --warn-bg: #3a2f12;
   --warn-text: #f3d79a;
 }
@@ -74,6 +80,7 @@ button.ghost {
 button.ghost:hover { border-color: var(--accent); }
 button:disabled { opacity: .4; cursor: default; }
 
+.banner.info { background: var(--surface); color: var(--text-2); border: 1px solid var(--border); }
 .banner {
   background: var(--warn-bg); color: var(--warn-text);
   padding: 10px 14px; border-radius: var(--radius); margin-bottom: 16px;
@@ -119,7 +126,10 @@ svg .baseline { stroke: var(--muted); stroke-width: 1; }
 svg .bar { fill: var(--accent); transition: fill .1s; }
 svg .bar.dim { fill: var(--accent-soft); }
 svg .hit { fill: transparent; cursor: pointer; }
-svg .hit:hover + .bar, svg g.row:hover .bar { fill: var(--accent-hover); }
+svg g.row:not(.pair):hover .bar { fill: var(--accent-hover); }
+svg .bar.s1 { fill: var(--series-1); }
+svg .bar.s2 { fill: var(--series-2); }
+svg g.pair:hover .bar { opacity: .85; }
 svg .marker { stroke: var(--text-2); stroke-width: 1; stroke-dasharray: 3 3; }
 svg .marker-lbl { fill: var(--text-2); font-size: 11px; }
 
@@ -146,6 +156,10 @@ td.title a { color: var(--accent); text-decoration: none; }
 tr.closed td { color: var(--muted); }
 .tag { font-size: 11px; padding: 1px 6px; border-radius: 99px; border: 1px solid var(--border); color: var(--text-2); margin-left: 6px; }
 .pager { display: flex; gap: 12px; align-items: center; justify-content: flex-end; padding: 12px 16px; border-top: 1px solid var(--border); }
+
+.card.wide { grid-column: 1 / -1; }
+.note-box { font-size: 12px; color: var(--text-2); margin-top: 10px; max-width: 90ch; }
+.source-line a, .foot a { color: var(--accent); }
 
 .foot { color: var(--muted); font-size: 12px; margin-top: 20px; max-width: 80ch; }
 
