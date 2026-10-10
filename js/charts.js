@@ -131,3 +131,48 @@ export function vbar(host, bins, opts = {}) {
 export const compact = (v) =>
   v >= 1e6 ? `${+(v / 1e6).toFixed(1)}M` : v >= 1e3 ? `${+(v / 1e3).toFixed(1)}k` : `${Math.round(v)}`;
 const truncate = (s, n) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
+
+/**
+ * Two series per row on the same scale (e.g. two shares in %), with a legend.
+ * rows: [{ label, a, b, tip? }]  opts: { names: [aName, bName], format(value) }
+ */
+export function hbarPair(host, rows, opts) {
+  if (!rows.length) return empty(host);
+  const fmt = opts.format ?? ((v) => v.toLocaleString());
+  const W = opts.width ?? 760;
+  const labelW = 210, valueW = 56, barH = 10, pairGap = 2, rowH = barH * 2 + pairGap + 12, legendH = 26;
+  const plotW = W - labelW - valueW;
+  const H = legendH + rows.length * rowH;
+  const max = Math.max(...rows.flatMap((r) => [r.a, r.b]));
+
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": opts.ariaLabel ?? "Comparison chart" });
+  let lx = labelW;
+  opts.names.forEach((name, i) => {
+    svg.append(
+      el("rect", { x: lx, y: 4, width: 12, height: 12, rx: 3, class: `bar s${i + 1}` }),
+      el("text", { class: "lbl", x: lx + 18, y: 14 }, name),
+    );
+    lx += 26 + name.length * 6.4;
+  });
+
+  rows.forEach((r, i) => {
+    const y = legendH + i * rowH;
+    const g = el("g", { class: "row pair" });
+    g.append(el("text", { class: "lbl", x: labelW - 10, y: y + barH + 4, "text-anchor": "end" }, truncate(r.label, 32)));
+    [r.a, r.b].forEach((v, k) => {
+      const by = y + k * (barH + pairGap);
+      const w = max ? Math.max(2, (v / max) * plotW) : 2;
+      g.append(
+        el("path", { class: `bar s${k + 1}`, d: hBarPath(labelW, by, w, barH, 3) }),
+        el("text", { class: "val", x: labelW + w + 6, y: by + barH - 1 }, fmt(v)),
+      );
+    });
+    const hit = el("rect", { class: "hit", x: 0, y: y - 4, width: W, height: rowH });
+    hit.style.cursor = "default";
+    hit.addEventListener("mousemove", (e) => showTip(e, r.tip ?? `${r.label}<br>${opts.names[0]}: <b>${fmt(r.a)}</b><br>${opts.names[1]}: <b>${fmt(r.b)}</b>`));
+    hit.addEventListener("mouseleave", hideTip);
+    g.append(hit);
+    svg.append(g);
+  });
+  host.replaceChildren(svg);
+}
