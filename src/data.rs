@@ -12,23 +12,28 @@ pub struct BenchEntry {
     pub wage: Option<f64>,
 }
 
-/// StatCan Job Vacancy and Wage Survey figures for Ontario, keyed by broad category ("Total" for all).
+/// StatCan figures: Job Vacancy and Wage Survey by region ("CA" or a province code) and broad
+/// category ("Total" for all), plus population by region for per-capita rates.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Benchmark {
     pub source: String,
     pub period: String,
-    #[serde(rename = "byCategory")]
-    pub by_category: HashMap<String, BenchEntry>,
+    #[serde(rename = "byRegion")]
+    pub by_region: HashMap<String, HashMap<String, BenchEntry>>,
+    #[serde(default)]
+    pub population: HashMap<String, f64>,
+    #[serde(default, rename = "populationPeriod")]
+    pub population_period: String,
 }
 
 /// One posting as stored on disk: strings are indexes into `RawFile::dicts`.
 /// Column order matches `COLS`.
-pub type RawRow = (String, u32, u32, u32, u32, u32, u32, u32, Option<f32>, Option<f32>, String, u32, u32);
+pub type RawRow = (u32, u32, u32, u32, u32, u32, u32, u32, u32, Option<f32>, Option<f32>, String, u32, u32);
 
-pub const COLS: [&str; 13] = [
-    "id", "title", "occupation", "category", "level", "city", "employmentType", "term", "wageMin", "wageMax", "postedAt", "vacancies", "source",
+pub const COLS: [&str; 14] = [
+    "id", "title", "occupation", "category", "level", "city", "province", "employmentType", "term", "wageMin", "wageMax", "postedAt", "vacancies", "source",
 ];
-pub const DICT_COLS: [&str; 8] = ["title", "occupation", "category", "level", "city", "employmentType", "term", "source"];
+pub const DICT_COLS: [&str; 9] = ["title", "occupation", "category", "level", "city", "province", "employmentType", "term", "source"];
 
 #[derive(Serialize, Deserialize)]
 pub struct RawFile {
@@ -53,6 +58,7 @@ pub struct Job {
     pub category: u8,
     pub level: u8,
     pub city: u16,
+    pub province: u8,
     pub hours: u8,
     pub term: u8,
     pub source: u8,
@@ -101,6 +107,7 @@ pub struct Dataset {
     pub categories: Dict,
     pub levels: Dict,
     pub cities: Dict,
+    pub provinces: Dict,
     pub hours: Dict,
     pub terms: Dict,
     pub sources: Dict,
@@ -113,21 +120,22 @@ impl Dataset {
             bail!("unexpected column layout {:?}", raw.cols);
         }
         let mut dict = |name: &str| Dict::new(raw.dicts.remove(name).unwrap_or_default());
-        let (titles, occupations, categories, levels, cities, hours, terms, sources) = (
+        let (titles, occupations, categories, levels, cities, provinces, hours, terms, sources) = (
             dict("title"), dict("occupation"), dict("category"), dict("level"),
-            dict("city"), dict("employmentType"), dict("term"), dict("source"),
+            dict("city"), dict("province"), dict("employmentType"), dict("term"), dict("source"),
         );
         let jobs = raw
             .rows
             .into_iter()
-            .map(|(id, title, occ, cat, level, city, hrs, term, wmin, wmax, posted, vac, src)| {
+            .map(|(id, title, occ, cat, level, city, prov, hrs, term, wmin, wmax, posted, vac, src)| {
                 Ok(Job {
-                    id: id.parse().unwrap_or(0),
+                    id,
                     title,
                     occupation: occ as u16,
                     category: cat as u8,
                     level: level as u8,
                     city: city as u16,
+                    province: prov as u8,
                     hours: hrs as u8,
                     term: term as u8,
                     source: src as u8,
@@ -143,7 +151,7 @@ impl Dataset {
             source_url: raw.source_url,
             months: raw.months,
             benchmark: raw.benchmark,
-            titles, occupations, categories, levels, cities, hours, terms, sources,
+            titles, occupations, categories, levels, cities, provinces, hours, terms, sources,
             jobs,
         })
     }
