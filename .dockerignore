@@ -1,0 +1,6 @@
+target
+.git
+.github
+.claude
+.netlify
+node_modules
