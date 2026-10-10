@@ -1,79 +1,52 @@
 # Ontario Job Tracker
 
-A dashboard for exploring Ontario job postings: filter by category, city, pay, work mode, employment type, seniority and posting age, and see the results as charts and a sortable, exportable table.
+A dashboard for exploring job postings across Ontario: filter by occupation, city, offered wage, skill level, hours, term and month, and see the results as charts and a sortable, exportable table. It also compares the postings with Statistics Canada's vacancy estimates, to show which kinds of work the postings over- or under-count.
 
 Plain HTML, CSS and JavaScript. No build step, no dependencies.
 
-## Run it
+## Run it locally
 
 ```bash
 npm run dev
 ```
 
-Then open http://localhost:5173. (`npm run dev` just runs `python3 -m http.server 5173`; any static server works. Opening `index.html` directly from disk won't, because the page fetches `data/jobs.json`.)
+Then open http://localhost:5173. Any static file server works. Opening `index.html` directly from disk won't, because the page fetches `data/jobs.json`.
 
-## Data
+## Data sources
 
-The repo ships with **synthetic sample data** so the dashboard works out of the box. A banner says so whenever sample data is loaded.
+Both sources are official, free and need no API key.
 
-- `npm run sample` regenerates the sample (`node scripts/generate-sample.mjs [count]`).
-- `npm run fetch` pulls real postings from [TheirStack](https://theirstack.com) into `data/jobs.json`.
+| Source | What we use | Updated |
+|---|---|---|
+| [Job Postings Advertised on Canada's National Job Bank](https://open.canada.ca/data/en/dataset/ea639e28-c0fc-48bf-b5dd-b8899bd43072) (ESDC, Open Government Licence – Canada) | Every Ontario posting from the latest 3 monthly files: title, NOC 2021 occupation, city, offered wage, hours, term, number of openings, first posting date | Monthly, early in the following month |
+| [StatCan Job Vacancy and Wage Survey, table 14-10-0444-01](https://www150.statcan.gc.ca/t1/tbl1/en/tv.action?pid=1410044401) | Estimated Ontario vacancies and average offered hourly wage by broad occupational category | Quarterly |
 
-### Loading real postings from TheirStack
+To refresh the data:
 
-1. Put your key in a `.env` file (gitignored):
-   ```
-   THEIRSTACK_API_KEY=your_key_here
-   ```
-2. Check how many postings match before spending credits (fetches a single job):
-   ```bash
-   node scripts/fetch-theirstack.mjs --count
-   ```
-3. Fetch. Each job costs one credit, so `MAX_JOBS` defaults to 500:
-   ```bash
-   MAX_JOBS=2000 MAX_AGE_DAYS=60 npm run fetch
-   ```
+```bash
+npm run data
+```
 
-Optional settings: `ONTARIO_LOCATION_ID` (TheirStack's location id for Ontario; without it the script matches the location text "Ontario" and double-checks each job's province) and `CAD_PER_USD` (used only when a posting lists pay in USD).
+This downloads about 140 MB of CSVs, keeps the Ontario rows, and writes about 3 MB of JSON (about 740 KB gzipped) to `data/jobs.json`. Set `MONTHS=6` to keep more history.
 
-TheirStack doesn't tag postings with an industry, so the script assigns categories from title keywords (`CATEGORY_RULES` in the script). Expect some misses; anything unmatched becomes "Other".
+A GitHub Action (`.github/workflows/refresh-data.yml`) runs the same script every Monday and commits `data/jobs.json` when there's new data. If Netlify is linked to the repo, each of those commits redeploys the site.
 
-### Data schema
+### How the data is shaped
 
-`data/jobs.json` is `{ generatedAt, sample, source, jobs: [...] }`, where each job is:
+- **Category** is the NOC 2021 broad occupational category (first digit of the code). **Skill level** is the TEER category (second digit).
+- **Wages** are converted to hourly: annual ÷ 2,080, daily ÷ 8, and weekly or monthly using the posting's stated hours (40 a week if none are given). Values outside $10–$300/h are treated as missing.
+- **Toronto** includes North York, Etobicoke, Scarborough, York and East York, which Job Bank reports separately.
+- `data/jobs.json` is stored by column, with a lookup table for each repeated text field. `js/app.js` expands it on load.
 
-| field | example |
-|---|---|
-| `id` | `"S00001"` |
-| `title`, `company` | `"Registered Nurse"`, `"Trillium Health"` |
-| `category` | `"Healthcare"` |
-| `city` | `"Toronto"` |
-| `workMode` | `"On-site"` / `"Hybrid"` / `"Remote"` |
-| `employmentType` | `"Full-time"` |
-| `seniority` | `"Entry"` / `"Mid"` / `"Senior"` / `"Executive"` |
-| `salaryMin`, `salaryMax` | annual CAD, or `null` |
-| `postedAt`, `closedAt` | `"2026-10-01"`, `null` if still open |
-| `source` | `"Indeed"` |
-| `url` | link to the posting, or `null` |
+## Caveats
 
-Any source that can produce this shape will work with the dashboard.
+Postings measure what's advertised, not all hiring:
 
-## How to read it
+- **Job Bank is one slice of the market.** Employers using the Temporary Foreign Worker program must advertise there, so food service, caregiving and trades are over-represented, and tech and professional roles are under-represented. The "Postings vs. estimated vacancies" chart shows how far off each category is.
+- **No employer names and no closing dates** are published, so you can't see who is hiring or tell filled jobs from open ones.
+- **Partner postings** (about 60%) come from other job boards and have fewer fields filled in (no experience, education or telework details).
+- **Jobs that are never posted** (internal fills, referrals, agency hires) don't appear anywhere. StatCan's survey counts them; postings data can't.
 
-Postings measure what's advertised online, which is not the same as who is actually hiring:
+## Deploying
 
-- **Stale and ghost postings.** Some live postings have no hiring activity behind them. By default the dashboard shows postings from the last 30 days that haven't been marked closed. The "Older than 30 days" figure shows how much of the full set falls outside that window.
-- **Jobs that are never posted.** Internal fills, referrals and agency hires don't appear anywhere.
-- **Source mix.** Most postings come from big job boards, with their biases. The Source mix chart shows the breakdown.
-- **Location.** Remote and multi-location roles are fuzzy and may be loosely tied to Ontario.
-
-For a sanity check, compare category totals with Statistics Canada's Job Vacancy and Wage Survey for Ontario.
-
-## Features
-
-- Filters: search, category, city, work mode, type, seniority, minimum pay, posted within, hide closed, pay listed only
-- Filters are saved in the URL, so a filtered view can be bookmarked or shared
-- Click a bar in the category, median pay or city charts to filter by it; click again to clear
-- KPIs: matching postings, median pay, share with pay disclosed, distinct employers, remote/hybrid share, share older than 30 days
-- Sortable table with pagination and CSV export of the filtered rows
-- Light and dark mode
+The site is static. `netlify.toml` publishes the repo root, with no build command.
