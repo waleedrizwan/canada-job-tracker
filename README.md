@@ -24,7 +24,7 @@ Then open http://localhost:8080. The repo includes a current `data/jobs.json`, s
 | `PORT` | `8080` | |
 | `DATA_PATH` | `data/jobs.json` | where data is loaded from and saved to |
 | `MONTHS` | `3` | how many monthly Job Bank files to keep |
-| `REFRESH_HOURS` | `6` | how often to check for new releases (`0` turns it off) |
+| `REFRESH_HOURS` | `6` | how often to check for new releases, starting 10 minutes after the server starts (`0` turns it off) |
 
 ## Data sources
 
@@ -47,6 +47,16 @@ cargo run --release -- update   # download only if there's something new
 ```
 
 This streams about 140 MB of UTF-16 CSVs (about 158,000 postings for three months). Memory peaks around 85 MB because each file is processed as it downloads and repeated text is stored once.
+
+**Going easy on the sources.** Checking for new data costs one request to open.canada.ca and four to StatCan's API, and the 140 MB download only happens when there's something new:
+
+- The live site's visitors never contact these sources. Their browsers only download files from Cloudflare.
+- The daily job checks once a day.
+  - If the check can't reach the sources, it tries up to 3 more times, 10 minutes apart.
+  - A download that fails isn't repeated until the next day.
+- The server's first check waits 10 minutes after it starts. On a host that stops idle machines and starts them on the next visit, like Fly, a brief visit doesn't trigger a download.
+
+All requests reuse connections, give up on a stalled connection after 2 minutes, and identify the project in their user agent.
 
 ### How the data is shaped
 
@@ -92,7 +102,7 @@ The browser downloads the dataset once. After that, `app.js` renders each view w
 
 **Deploys are automatic.** The `canada-job-tracker` Worker is connected to this repo through [Workers Builds](https://developers.cloudflare.com/workers/ci-cd/builds/), Cloudflare's Git integration, which is free. On every push to `main`, Cloudflare runs `npm run build`, then `npx wrangler deploy`. Its build machines don't come with Rust, so `tools/build-site.sh` installs it first. Build logs are in the Cloudflare dashboard, under the Worker's **Deployments**.
 
-**Data updates.** A static site can't refresh itself, so `.github/workflows/update-data.yml` does it. Every day it runs `cargo run --release -- update`. If Job Bank or StatCan has published something new, it commits the new `data/jobs.json` to `main`, and that push makes Cloudflare redeploy. Neither step needs a Cloudflare API token in GitHub.
+**Data updates.** A static site can't refresh itself, so `.github/workflows/update-data.yml` does it. Every day at 15:17 UTC, after StatCan's 8:30 a.m. ET releases, it runs `cargo run --release -- update`. If Job Bank or StatCan has published something new, it commits the new `data/jobs.json` to `main`, and that push makes Cloudflare redeploy. Neither step needs a Cloudflare API token in GitHub.
 
 To deploy by hand instead, you need Rust, Node and a Cloudflare account:
 

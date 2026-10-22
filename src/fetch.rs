@@ -50,11 +50,18 @@ pub struct MonthFile {
     pub url: String,
 }
 
-fn client() -> reqwest::Client {
-    reqwest::Client::builder()
-        .user_agent("canada-job-tracker (+https://github.com/waleedrizwan/canada-job-tracker)")
-        .build()
-        .expect("http client")
+/// One shared client, so requests reuse connections. The timeouts end a stalled request
+/// instead of letting it hang; a slow but steady download is fine.
+fn client() -> &'static reqwest::Client {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .user_agent("canada-job-tracker (+https://github.com/waleedrizwan/canada-job-tracker)")
+            .connect_timeout(std::time::Duration::from_secs(30))
+            .read_timeout(std::time::Duration::from_secs(120))
+            .build()
+            .expect("http client")
+    })
 }
 
 /// The latest `months` English monthly Job Bank files, newest first.
@@ -344,7 +351,12 @@ pub async fn benchmark() -> Result<Benchmark> {
 
 /// Fetches everything and builds the file the server loads.
 pub async fn fetch_all(months: usize) -> Result<RawFile> {
-    let files = job_bank_files(months).await?;
+    download(job_bank_files(months).await?, benchmark().await).await
+}
+
+/// Downloads the Job Bank `files` and builds the file the server loads, with the StatCan
+/// figures already fetched (`fetch_all` above, or a check for new data).
+pub async fn download(files: Vec<MonthFile>, bench: Result<Benchmark>) -> Result<RawFile> {
     if files.is_empty() {
         bail!("no Job Bank files found");
     }
@@ -357,7 +369,6 @@ pub async fn fetch_all(months: usize) -> Result<RawFile> {
     }
     rows.sort_by(|a, b| b.11.cmp(&a.11));
 
-    let bench = benchmark().await;
     match &bench {
         Ok(b) => eprintln!(
             "  StatCan JVWS {}: {:.0} vacancies in Canada; population for {} regions ({})",

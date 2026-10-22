@@ -5,7 +5,9 @@ name: Update data
 
 on:
   schedule:
-    - cron: "30 11 * * *" # daily, 11:30 UTC
+    # Daily at 15:17 UTC: after StatCan's 8:30 a.m. ET releases (its tables can be locked
+    # before then), and off the top of the hour, when GitHub's schedules are busiest.
+    - cron: "17 15 * * *"
   workflow_dispatch:
 
 permissions:
@@ -23,14 +25,17 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release
 
-      # open.canada.ca has outages, so try a few times, 10 minutes apart, before failing.
-      # Each try is capped at 20 minutes in case a download hangs.
+      # open.canada.ca has outages. If the check can't reach the sources (exit code 2, a handful
+      # of small requests), try again up to 3 more times, 10 minutes apart. If the download
+      # itself fails, don't: that's about 140 MB, so it waits for tomorrow's run.
       - name: Download new data, if any
         run: |
           for attempt in 1 2 3 4; do
-            timeout 20m target/release/canada-job-tracker update && exit 0
+            status=0
+            timeout 30m target/release/canada-job-tracker update || status=$?
+            [ "$status" -eq 2 ] || exit "$status"
             if [ "$attempt" -lt 4 ]; then
-              echo "::warning::Try $attempt of 4 failed; trying again in 10 minutes."
+              echo "::warning::Couldn't reach the data sources (try $attempt of 4); trying again in 10 minutes."
               sleep 600
             fi
           done

@@ -7,6 +7,7 @@
 //!
 //! Env: DATA_PATH (default data/jobs.json), MONTHS (Job Bank months to keep, default 3),
 //! REFRESH_HOURS (how often the server checks for new releases, default 6; 0 disables).
+//! `update` exits with code 2 if it couldn't reach the sources to check.
 
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
@@ -19,9 +20,13 @@ use axum::routing::get;
 use axum::Router;
 use tower_http::compression::CompressionLayer;
 
-use canada_job_tracker::data::{Dataset, RawFile};
+use canada_job_tracker::data::{Benchmark, Dataset, RawFile};
+use canada_job_tracker::fetch::{self, MonthFile};
 use canada_job_tracker::query::Params;
-use canada_job_tracker::{STYLES, fetch, site, views};
+use canada_job_tracker::{STYLES, site, views};
+
+/// How long the server waits after starting before its first check for new data.
+const FIRST_CHECK: Duration = Duration::from_secs(10 * 60);
 
 #[derive(Clone)]
 struct App {
@@ -67,8 +72,18 @@ async fn main() -> Result<()> {
         }
         Some("update") => {
             let current = Dataset::load(&data_path)?;
-            match newer_data(&current, months).await? {
-                Some(raw) => {
+            // Exit code 2 means the check itself failed (a handful of small requests), which is
+            // worth retrying soon. Other failures aren't: retrying would download everything again.
+            let found = match check(&current, months).await {
+                Ok(found) => found,
+                Err(e) => {
+                    eprintln!("Couldn't check for new data: {e:#}");
+                    std::process::exit(2);
+                }
+            };
+            match found {
+                Some((files, bench)) => {
+                    let raw = download(&current, files, bench).await?;
                     save(&data_path, &raw)?;
                     eprintln!("Wrote {} postings (latest {}) to {data_path}", raw.rows.len(), raw.as_of);
                 }
@@ -142,7 +157,10 @@ async fn styles() -> Response {
 }
 
 /// Checks for a new Job Bank month or StatCan quarter and reloads when either appears.
+/// The first check waits a while, so a machine that only wakes briefly for a visit (like
+/// Fly's, which stop when idle) doesn't download everything again each time it starts.
 async fn refresh_loop(app: App, every: Duration) {
+    tokio::time::sleep(FIRST_CHECK).await;
     loop {
         if let Err(e) = refresh_once(&app).await {
             eprintln!("Refresh failed: {e:#}");
@@ -152,9 +170,11 @@ async fn refresh_loop(app: App, every: Duration) {
 }
 
 async fn refresh_once(app: &App) -> Result<()> {
-    let Some(raw) = newer_data(&app.current(), app.months).await? else {
+    let current = app.current();
+    let Some((files, bench)) = check(&current, app.months).await? else {
         return Ok(());
     };
+    let raw = download(&current, files, bench).await?;
     if let Err(e) = save(&app.data_path, &raw) {
         eprintln!("Couldn't save refreshed data: {e:#}");
     }
@@ -164,16 +184,29 @@ async fn refresh_once(app: &App) -> Result<()> {
     Ok(())
 }
 
-/// Downloads everything again if Job Bank has a new month or StatCan a new quarter.
-async fn newer_data(current: &Dataset, months: usize) -> Result<Option<RawFile>> {
-    let latest: Vec<String> = fetch::job_bank_files(months).await?.into_iter().map(|f| f.name).collect();
-    let bench_period = fetch::benchmark().await.ok().map(|b| b.period);
-    let have_period = current.benchmark.as_ref().map(|b| b.period.clone());
+/// Job Bank's latest files and StatCan's latest figures, if Job Bank has a new month or StatCan
+/// a new quarter. Costs one request to open.canada.ca and a few to StatCan.
+async fn check(current: &Dataset, months: usize) -> Result<Option<(Vec<MonthFile>, Result<Benchmark>)>> {
+    let files = fetch::job_bank_files(months).await?;
+    let bench = fetch::benchmark().await;
+    let latest: Vec<&str> = files.iter().map(|f| f.name.as_str()).collect();
+    let bench_period = bench.as_ref().ok().map(|b| b.period.as_str());
+    let have_period = current.benchmark.as_ref().map(|b| b.period.as_str());
     if latest == current.months && (bench_period.is_none() || bench_period == have_period) {
         return Ok(None);
     }
-    eprintln!("New data available ({latest:?}, StatCan {bench_period:?}); refreshing…");
-    Ok(Some(fetch::fetch_all(months).await?))
+    eprintln!("New data available ({latest:?}, StatCan {bench_period:?}); downloading…");
+    Ok(Some((files, bench)))
+}
+
+/// Downloads what `check` found, reusing its StatCan figures. If StatCan was unavailable,
+/// keeps the figures we already have rather than dropping them.
+async fn download(current: &Dataset, files: Vec<MonthFile>, bench: Result<Benchmark>) -> Result<RawFile> {
+    let mut raw = fetch::download(files, bench).await?;
+    if raw.benchmark.is_none() {
+        raw.benchmark = current.benchmark.clone();
+    }
+    Ok(raw)
 }
 
 async fn shutdown() {
