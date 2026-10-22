@@ -1,18 +1,12 @@
 //! Canada Job Tracker: a server-rendered dashboard of Canadian job postings.
 //!
-//!   canada-job-tracker           serve the dashboard (PORT, default 8080)
-//!   canada-job-tracker fetch     download fresh data into DATA_PATH and exit
+//!   canada-job-tracker                 serve the dashboard (PORT, default 8080)
+//!   canada-job-tracker fetch           download fresh data into DATA_PATH and exit
+//!   canada-job-tracker update          like fetch, but only if newer data has been published
+//!   canada-job-tracker site WASM [OUT] build the static site (see src/site.rs) into OUT, default dist
 //!
 //! Env: DATA_PATH (default data/jobs.json), MONTHS (Job Bank months to keep, default 3),
 //! REFRESH_HOURS (how often the server checks for new releases, default 6; 0 disables).
-
-mod charts;
-mod data;
-mod fetch;
-mod query;
-mod regions;
-mod views;
-mod canada_map;
 
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
@@ -25,21 +19,9 @@ use axum::routing::get;
 use axum::Router;
 use tower_http::compression::CompressionLayer;
 
-use data::{Dataset, RawFile};
-use query::Params;
-
-const STYLES: &str = include_str!("../static/styles.css");
-
-/// Changes whenever the stylesheet does, so browsers can cache it forever.
-pub fn styles_version() -> &'static str {
-    use std::hash::{DefaultHasher, Hash, Hasher};
-    static V: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-    V.get_or_init(|| {
-        let mut h = DefaultHasher::new();
-        STYLES.hash(&mut h);
-        format!("{:x}", h.finish())
-    })
-}
+use canada_job_tracker::data::{Dataset, RawFile};
+use canada_job_tracker::query::Params;
+use canada_job_tracker::{STYLES, fetch, site, views};
 
 #[derive(Clone)]
 struct App {
@@ -74,12 +56,36 @@ async fn main() -> Result<()> {
     let data_path = env_or("DATA_PATH", "data/jobs.json".to_string());
     let months = env_or("MONTHS", 3usize);
 
-    if std::env::args().nth(1).as_deref() == Some("fetch") {
-        eprintln!("Fetching Job Bank and StatCan data…");
-        let raw = fetch::fetch_all(months).await?;
-        save(&data_path, &raw)?;
-        eprintln!("Wrote {} postings (latest {}) to {data_path}", raw.rows.len(), raw.as_of);
-        return Ok(());
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    match args.first().map(String::as_str) {
+        Some("fetch") => {
+            eprintln!("Fetching Job Bank and StatCan data…");
+            let raw = fetch::fetch_all(months).await?;
+            save(&data_path, &raw)?;
+            eprintln!("Wrote {} postings (latest {}) to {data_path}", raw.rows.len(), raw.as_of);
+            return Ok(());
+        }
+        Some("update") => {
+            let current = Dataset::load(&data_path)?;
+            match newer_data(&current, months).await? {
+                Some(raw) => {
+                    save(&data_path, &raw)?;
+                    eprintln!("Wrote {} postings (latest {}) to {data_path}", raw.rows.len(), raw.as_of);
+                }
+                None => eprintln!("{data_path} is up to date"),
+            }
+            return Ok(());
+        }
+        Some("site") => {
+            let wasm_path = args.get(1).context("usage: canada-job-tracker site WASM [OUT]")?;
+            let out = args.get(2).map_or("dist", String::as_str);
+            let data = std::fs::read(&data_path).with_context(|| format!("reading {data_path}"))?;
+            let wasm = std::fs::read(wasm_path).with_context(|| format!("reading {wasm_path}"))?;
+            site::build(&Dataset::from_json(&data)?, &data, &wasm, std::path::Path::new(out))?;
+            eprintln!("Built the static site in {out}");
+            return Ok(());
+        }
+        _ => {}
     }
 
     let ds = Dataset::load(&data_path).context("no data yet; run `cargo run --release -- fetch` first")?;
@@ -116,7 +122,7 @@ async fn index(State(app): State<App>, Query(p): Query<Params>) -> Response {
 async fn export(State(app): State<App>, Query(p): Query<Params>) -> Response {
     let ds = app.current();
     let body = views::csv(&ds, &p.normalize());
-    let name = format!("attachment; filename=\"ontario-jobs-{}.csv\"", ds.as_of);
+    let name = format!("attachment; filename=\"{}\"", views::csv_filename(&ds));
     (
         [
             (header::CONTENT_TYPE, HeaderValue::from_static("text/csv; charset=utf-8")),
@@ -146,15 +152,9 @@ async fn refresh_loop(app: App, every: Duration) {
 }
 
 async fn refresh_once(app: &App) -> Result<()> {
-    let current = app.current();
-    let latest: Vec<String> = fetch::job_bank_files(app.months).await?.into_iter().map(|f| f.name).collect();
-    let bench_period = fetch::benchmark().await.ok().map(|b| b.period);
-    let have_period = current.benchmark.as_ref().map(|b| b.period.clone());
-    if latest == current.months && (bench_period.is_none() || bench_period == have_period) {
+    let Some(raw) = newer_data(&app.current(), app.months).await? else {
         return Ok(());
-    }
-    eprintln!("New data available ({latest:?}, StatCan {bench_period:?}); refreshing…");
-    let raw = fetch::fetch_all(app.months).await?;
+    };
     if let Err(e) = save(&app.data_path, &raw) {
         eprintln!("Couldn't save refreshed data: {e:#}");
     }
@@ -162,6 +162,18 @@ async fn refresh_once(app: &App) -> Result<()> {
     eprintln!("Refreshed: {} postings, latest {}", ds.jobs.len(), ds.as_of);
     *app.data.write().expect("dataset lock") = Arc::new(ds);
     Ok(())
+}
+
+/// Downloads everything again if Job Bank has a new month or StatCan a new quarter.
+async fn newer_data(current: &Dataset, months: usize) -> Result<Option<RawFile>> {
+    let latest: Vec<String> = fetch::job_bank_files(months).await?.into_iter().map(|f| f.name).collect();
+    let bench_period = fetch::benchmark().await.ok().map(|b| b.period);
+    let have_period = current.benchmark.as_ref().map(|b| b.period.clone());
+    if latest == current.months && (bench_period.is_none() || bench_period == have_period) {
+        return Ok(None);
+    }
+    eprintln!("New data available ({latest:?}, StatCan {bench_period:?}); refreshing…");
+    Ok(Some(fetch::fetch_all(months).await?))
 }
 
 async fn shutdown() {

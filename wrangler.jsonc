@@ -1,0 +1,12 @@
+// Cloudflare hosting for the static site that tools/build-site.sh builds into dist/.
+// It's static files only (no Worker code runs): the browser renders each view (static/app.js).
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "canada-job-tracker",
+	"compatibility_date": "2026-09-01",
+	"assets": {
+		"directory": "./dist",
+		// Every page URL gets index.html, and app.js draws the view the URL asks for.
+		"not_found_handling": "single-page-application"
+	}
+}

@@ -670,6 +670,11 @@ pub fn page(ds: &Dataset, p: &Params) -> Markup {
     }
 }
 
+/// The download name for `csv`.
+pub fn csv_filename(ds: &Dataset) -> String {
+    format!("canada-jobs-{}.csv", ds.as_of)
+}
+
 /// The filtered postings as CSV, in table order.
 pub fn csv(ds: &Dataset, p: &Params) -> String {
     let mut rows = query::filter(ds, p);

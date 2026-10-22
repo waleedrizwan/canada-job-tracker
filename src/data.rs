@@ -158,7 +158,10 @@ impl Dataset {
 
     pub fn load(path: &str) -> Result<Self> {
         let bytes = std::fs::read(path).with_context(|| format!("reading {path}"))?;
-        let raw: RawFile = serde_json::from_slice(&bytes).with_context(|| format!("parsing {path}"))?;
-        Self::from_raw(raw)
+        Self::from_json(&bytes).with_context(|| format!("parsing {path}"))
+    }
+
+    pub fn from_json(bytes: &[u8]) -> Result<Self> {
+        Self::from_raw(serde_json::from_slice(bytes)?)
     }
 }

@@ -291,3 +291,7 @@ table.heat td { padding: 0; border: 0; background: var(--fill); border-radius: 3
 table.heat td a, table.heat td span { display: block; padding: 8px 4px; color: var(--cell-ink); text-decoration: none; font-weight: 700; font-variant-numeric: tabular-nums; }
 table.heat td a:hover { outline: 2px solid var(--ink); outline-offset: -2px; border-radius: 3px; }
 table.heat td.nodata span { font-weight: 400; }
+
+/* Static site only (static/app.js): dim the page while a view is loading. */
+html.loading .answer { opacity: .45; transition: opacity .15s .1s; }
+html.loading { cursor: progress; }

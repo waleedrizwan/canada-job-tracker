@@ -1,0 +1,13 @@
+{
+	"name": "canada-job-tracker-site",
+	"description": "Cloudflare tooling for the static site (see wrangler.jsonc)",
+	"private": true,
+	"scripts": {
+		"build": "sh tools/build-site.sh",
+		"dev": "wrangler dev --port 8787",
+		"deploy": "sh tools/build-site.sh && wrangler deploy"
+	},
+	"devDependencies": {
+		"wrangler": "4.152.0"
+	}
+}
