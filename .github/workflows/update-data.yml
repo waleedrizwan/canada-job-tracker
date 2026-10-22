@@ -17,12 +17,25 @@ concurrency:
 jobs:
   update:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v5
       - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release
 
+      # open.canada.ca has outages, so try a few times, 10 minutes apart, before failing.
+      # Each try is capped at 20 minutes in case a download hangs.
       - name: Download new data, if any
-        run: cargo run --release -- update
+        run: |
+          for attempt in 1 2 3 4; do
+            timeout 20m target/release/canada-job-tracker update && exit 0
+            if [ "$attempt" -lt 4 ]; then
+              echo "::warning::Try $attempt of 4 failed; trying again in 10 minutes."
+              sleep 600
+            fi
+          done
+          echo "::error::Couldn't reach the data sources after 4 tries. Tomorrow's run will try again."
+          exit 1
 
       - name: Commit new data
         run: |
