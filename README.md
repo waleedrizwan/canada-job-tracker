@@ -37,7 +37,7 @@ Both sources are official, free and need no API key.
 | [StatCan population estimates, table 17-10-0009-01](https://www150.statcan.gc.ca/t1/tbl1/en/tv.action?pid=1710000901) | Population by province/territory, for postings per 10,000 people on the map | Quarterly |
 | [Natural Earth](https://www.naturalearthdata.com/) 1:50m admin-1 boundaries (public domain) | Province and territory outlines, converted once into `src/canada_map.rs` by `tools/gen_map.py` | Static |
 
-**The data stays up to date by itself.** The server checks both sources every `REFRESH_HOURS`. When Job Bank publishes a new month or StatCan a new quarter, the server downloads it in the background and switches over without restarting. For the live site, a daily GitHub Actions job does the same and redeploys (see [Deploying](#deploying)).
+**The data stays up to date by itself.** The server checks both sources every `REFRESH_HOURS`. When Job Bank publishes a new month or StatCan a new quarter, the server downloads it in the background and switches over without restarting. For the live site, a daily GitHub Actions job checks instead, and new data is deployed automatically (see [Deploying](#deploying)).
 
 To fetch data by hand (for example, to update the copy bundled in the repo):
 
@@ -75,7 +75,7 @@ This streams about 140 MB of UTF-16 CSVs (about 158,000 postings for three month
 | `static/app.js` | Static site only: loads the WebAssembly renderer and handles links, forms and downloads in the browser |
 | `tools/build-site.sh` | Compiles the WebAssembly and builds the static site |
 | `wrangler.jsonc` | Cloudflare config for the static site |
-| `.github/workflows/deploy.yml` | Daily data check, and deploys to Cloudflare |
+| `.github/workflows/update-data.yml` | Daily check for new data, committed to `main` |
 
 ## Deploying
 
@@ -90,7 +90,11 @@ The live site, https://canada-job-tracker.w2riz.workers.dev, is static files on 
 
 The browser downloads the dataset once. After that, `app.js` renders each view with the same Rust code the server uses, so filters, chart links, paging, the back button and CSV downloads work as they do on the server, without page reloads. Every URL is served `index.html`, and `app.js` draws the view the URL asks for. Without JavaScript, only the default view shows.
 
-To deploy by hand, you need Rust, Node and a Cloudflare account:
+**Deploys are automatic.** The `canada-job-tracker` Worker is connected to this repo through [Workers Builds](https://developers.cloudflare.com/workers/ci-cd/builds/), Cloudflare's Git integration, which is free. On every push to `main`, Cloudflare runs `npm run build`, then `npx wrangler deploy`. Its build machines don't come with Rust, so `tools/build-site.sh` installs it first. Build logs are in the Cloudflare dashboard, under the Worker's **Deployments**.
+
+**Data updates.** A static site can't refresh itself, so `.github/workflows/update-data.yml` does it. Every day it runs `cargo run --release -- update`. If Job Bank or StatCan has published something new, it commits the new `data/jobs.json` to `main`, and that push makes Cloudflare redeploy. Neither step needs a Cloudflare API token in GitHub.
+
+To deploy by hand instead, you need Rust, Node and a Cloudflare account:
 
 ```bash
 rustup target add wasm32-unknown-unknown   # first time only
@@ -100,19 +104,6 @@ npm run deploy                              # builds dist/, then uploads it
 ```
 
 To try the static site locally, run `npm run build`, then `npm run dev`, then open http://localhost:8787.
-
-**Data updates.** A static site can't refresh itself, so `.github/workflows/deploy.yml` does it:
-
-- Every day, it runs `cargo run --release -- update`.
-- If Job Bank or StatCan has published something new, it commits the new `data/jobs.json` and redeploys.
-- Pushes to `main` redeploy too.
-
-The workflow needs a Cloudflare API token:
-
-1. In the Cloudflare dashboard, open **My Profile → API Tokens → Create Token** and use the **Edit Cloudflare Workers** template.
-2. Save it as a repository secret named `CLOUDFLARE_API_TOKEN` (Settings → Secrets and variables → Actions, or `gh secret set CLOUDFLARE_API_TOKEN`).
-
-Until the secret exists, the workflow skips deploying and says so.
 
 ### Fly.io
 

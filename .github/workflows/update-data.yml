@@ -1,0 +1,36 @@
+# Keeps the live site current. Every day it checks whether Job Bank or StatCan has published new
+# data; if so, it commits the new data/jobs.json to main. Cloudflare (Workers Builds, connected to
+# this repo) rebuilds and deploys the site on every push to main, including that one.
+name: Update data
+
+on:
+  schedule:
+    - cron: "30 11 * * *" # daily, 11:30 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-data
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Download new data, if any
+        run: cargo run --release -- update
+
+      - name: Commit new data
+        run: |
+          if git diff --quiet data/jobs.json; then
+            echo "No new data."
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit -m "Update data to $(jq -r .asOf data/jobs.json)" data/jobs.json
+            git push
+          fi
