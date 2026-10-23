@@ -39,6 +39,16 @@ fn wage(v: f64) -> String {
 fn wage_short(v: f32) -> String {
     if v.fract() == 0.0 { format!("${v}") } else { format!("${v:.2}") }
 }
+/// An offered range, with cents on both ends if either has them ("$16.60–$28.00", not "$16.60–$28").
+fn wage_range(lo: f32, hi: f32) -> String {
+    if lo == hi {
+        wage_short(lo)
+    } else if lo.fract() == 0.0 && hi.fract() == 0.0 {
+        format!("${lo}–${hi}")
+    } else {
+        format!("${lo:.2}–${hi:.2}")
+    }
+}
 fn annual(h: f64) -> String {
     format!("≈ ${}/yr", compact(h * HOURS_PER_YEAR))
 }
@@ -616,19 +626,18 @@ pub fn page(ds: &Dataset, p: &Params) -> Markup {
                                         serde_urlencoded::to_string([("searchstring", title), ("locationstring", loc.as_str())]).unwrap_or_default());
                                     tr {
                                         td.title { a href=(search) target="_blank" rel="noopener" title="Find current postings like this on Job Bank" { (title) } }
-                                        td { (ds.occupations.get(j.occupation as usize)) }
-                                        td { (city) }
-                                        td { (ds.hours.get(j.hours as usize)) }
-                                        td { (ds.terms.get(j.term as usize)) }
-                                        td.num {
+                                        td.occ { (ds.occupations.get(j.occupation as usize)) }
+                                        td.city { @if city == "Not given" { "Not given, " (ds.provinces.get(j.province as usize)) } @else { (city) } }
+                                        td.hours { (ds.hours.get(j.hours as usize)) }
+                                        td.term { (ds.terms.get(j.term as usize)) }
+                                        td.num.wage {
                                             @match (j.wage_min, j.wage_max) {
-                                                (Some(a), Some(b)) if a != b => { (wage_short(a)) "–" (wage_short(b)) }
-                                                (Some(a), _) => { (wage_short(a)) }
+                                                (Some(a), b) => { (wage_range(a, b.unwrap_or(a))) }
                                                 _ => { "Not given" }
                                             }
                                         }
-                                        td.num { (j.vacancies) }
-                                        td.date { (format!("{} {}", &MONTHS[j.posted.month0() as usize][..3], j.posted.day())) }
+                                        td.num.openings { (j.vacancies) span.unit { (if j.vacancies == 1 { " opening" } else { " openings" }) } }
+                                        td.date { span.unit { "Posted " } (format!("{} {}", &MONTHS[j.posted.month0() as usize][..3], j.posted.day())) }
                                     }
                                 }
                                 @if slice.is_empty() {
