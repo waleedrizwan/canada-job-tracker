@@ -11,13 +11,37 @@ Written in Rust. The same Rust code renders every page, including the SVG charts
 
 All page state lives in the URL, so any view can be bookmarked or shared. Bars in the charts are links that apply a filter, and hovering a bar shows its numbers.
 
+![The dashboard: a fill-in sentence to choose jobs, and a plain-language answer](docs/screenshots/dashboard.png)
+
+| | |
+|---|---|
+| ![Map of Canada shaded by median hourly offer, with provinces ranked](docs/screenshots/map.png) | ![Heat grid of median hourly offer by field and province](docs/screenshots/heat-grid.png) |
+
+<img src="docs/screenshots/phone-postings.png" alt="The postings list on a phone" width="300">
+
 ## Run it locally
+
+You need [Rust](https://rustup.rs). The repo includes a current `data/jobs.json`, so either version works straight away.
+
+**The server version** (plain HTML, no JavaScript):
 
 ```bash
 cargo run --release
 ```
 
-Then open http://localhost:8080. The repo includes a current `data/jobs.json`, so it works straight away.
+Then open http://localhost:8080.
+
+**The static site**, as it runs on Cloudflare (also needs Node):
+
+```bash
+npm install
+npm run build   # compiles the WebAssembly renderer and builds dist/
+npm run dev     # serves dist/ with wrangler on port 8787
+```
+
+Then open http://localhost:8787.
+
+Settings for the server version:
 
 | Env var | Default | |
 |---|---|---|
@@ -28,7 +52,7 @@ Then open http://localhost:8080. The repo includes a current `data/jobs.json`, s
 
 ## Data sources
 
-Both sources are official, free and need no API key.
+All sources are official, free and need no API key.
 
 | Source | What we use | Updated |
 |---|---|---|
@@ -66,6 +90,37 @@ All requests reuse connections, give up on a stalled connection after 2 minutes,
 - **Map and heat-grid colours** use quantile steps, so each shade covers about the same number of provinces or cells and one outlier can't wash out the rest. Heat-grid cells need at least 10 postings with pay.
 - In memory, each posting is packed into about 40 bytes, with repeated text stored once. The server uses about 85 MB, even mid-refresh, and renders a page in 5–15 ms. In the browser, loading the dataset takes about 0.1 s on a recent laptop and each view renders in 10–25 ms.
 
+## Tests
+
+```bash
+npm install
+npx playwright install chromium   # first time only
+npm test
+```
+
+`npm test` runs three things in order:
+
+1. `cargo test`: unit tests for the Job Bank parser and wage conversion (`src/fetch.rs`), the data format (`src/data.rs`), filtering and sorting (`src/query.rs`), chart scales and colour steps (`src/charts.rs`) and the page and CSV (`src/views.rs`), using a small made-up dataset. `tests/real_data.rs` also renders several views from the bundled `data/jobs.json`. None of the tests use the network.
+2. `npm run build`, so the browser tests see the current code.
+3. `playwright test`: smoke tests in `e2e/smoke.spec.js` against `wrangler dev` on port 8787 (started for you, or reused if it's already running). They load the page, use the form, a chart link, the back button and the CSV download, check the empty state, check that the phone layout fits 390px, and fail on any console error.
+
+`cargo test` and `npm run test:e2e` run either half on its own.
+
+## Architecture
+
+```
+Job Bank CSVs + StatCan API ──fetch.rs──▶ data/jobs.json ──data.rs──▶ Dataset (in memory)
+                                                                         │
+                                       URL query ──query.rs──▶ filtered postings
+                                                                         │
+                                                       views.rs + charts.rs ──▶ HTML / CSV
+```
+
+- **One renderer, two hosts.** `src/views.rs` turns a `Dataset` and the URL's parameters into a complete HTML page (Maud templates), and `src/charts.rs` draws the charts as HTML and inline SVG. The Axum server (`src/main.rs`) calls it for each request. The static site compiles the same library to WebAssembly (`src/wasm.rs`), and `static/app.js` calls it in the browser whenever a link is clicked or the form is sent, then swaps in the new page body.
+- **The URL is the state.** Every filter, sort, page and map setting is a query parameter (`query::Params`), so the server and the browser build produce the same page for the same URL. Malformed or unknown values fall back to defaults or to "no matches" rather than errors.
+- **Compact data.** `data/jobs.json` stores each text column once as a list of distinct values, with postings as rows of indexes. In memory, each posting is a ~40-byte struct, and searches compare each distinct title once rather than once per posting.
+- **No database.** All of the data fits in memory, so filtering is a scan over ~158,000 postings, which takes a few milliseconds.
+
 ## Code layout
 
 | File | |
@@ -84,6 +139,8 @@ All requests reuse connections, give up on a stalled connection after 2 minutes,
 | `static/styles.css` | Stylesheet, built into the binary |
 | `static/app.js` | Static site only: loads the WebAssembly renderer and handles links, forms and downloads in the browser |
 | `tools/build-site.sh` | Compiles the WebAssembly and builds the static site |
+| `tests/real_data.rs` | Renders views from the bundled data |
+| `e2e/smoke.spec.js`, `playwright.config.js` | Browser smoke tests (Playwright) |
 | `wrangler.jsonc` | Cloudflare config for the static site |
 | `.github/workflows/update-data.yml` | Daily check for new data, committed to `main` |
 
@@ -112,8 +169,6 @@ npm install
 npx wrangler login                          # first time only
 npm run deploy                              # builds dist/, then uploads it
 ```
-
-To try the static site locally, run `npm run build`, then `npm run dev`, then open http://localhost:8787.
 
 ### Fly.io
 
