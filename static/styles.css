@@ -317,5 +317,7 @@ table.heat td a:hover { outline: 2px solid var(--ink); outline-offset: -2px; bor
 table.heat td.nodata span { font-weight: 400; }
 
 /* Static site only (static/app.js): dim the page while a view is loading. */
-html.loading .answer { opacity: .45; transition: opacity .15s .1s; }
+html.loading :is(.answer, .charts, .listing) { opacity: .45; transition: opacity .15s .1s; }
+.notice { background: var(--highlight); color: var(--highlight-ink); padding: 10px 14px; border-radius: 6px; font-weight: 700; }
+.notice a { color: inherit; }
 html.loading { cursor: progress; }

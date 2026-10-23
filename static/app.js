@@ -25,6 +25,17 @@ ready.catch((e) => {
   failed = true;
   document.documentElement.classList.remove("loading");
   console.error("Couldn't load the dashboard:", e);
+  // Say so if this URL asked for a different view, rather than show the default one as if it were.
+  if (location.search || location.pathname !== "/") {
+    const note = document.createElement("p");
+    note.className = "notice";
+    note.setAttribute("role", "alert");
+    const retry = document.createElement("a");
+    retry.href = location.href;
+    retry.textContent = "Try again";
+    note.append("Couldn't load the data for this view, so these figures are for all jobs in Canada. ", retry);
+    document.querySelector(".answer")?.prepend(note);
+  }
 });
 
 // Copies `bytes` into the module's memory and calls `fn` with them; see src/wasm.rs.
