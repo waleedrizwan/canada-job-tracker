@@ -1,4 +1,4 @@
-/* Ontario Job Tracker
+/* Canada Job Tracker
    Cool paper, pine ink, highlighter-yellow fill-in fields. One typeface: Atkinson Hyperlegible Next. */
 
 :root {
@@ -225,8 +225,9 @@ td.empty-row { color: var(--muted); padding: 32px 16px; }
 }
 a.bar-row:hover { color: inherit; text-decoration: none; }
 .bar-row .label { font-size: 14px; color: var(--ink-2); text-align: right; line-height: 1.25; }
-.track { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.fill { display: block; height: 16px; max-width: calc(100% - 5.5em); background: var(--pine); border-radius: 0 4px 4px 0; flex: none; }
+/* The padding leaves room for the value after the longest bar, so widths stay proportional. */
+.track { display: flex; align-items: center; gap: 8px; min-width: 0; padding-right: 5.5em; }
+.fill { display: block; height: 16px; background: var(--pine); border-radius: 0 4px 4px 0; flex: none; }
 .value { font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
 a.bar-row:hover .fill, a.bar-row:focus-visible .fill { background: var(--pine-deep); }
 a.bar-row:hover .label { color: var(--ink); text-decoration: underline; }
@@ -260,7 +261,7 @@ a.bar-row:hover .label { color: var(--ink); text-decoration: underline; }
 }
 .nodata { --fill: var(--nodata); --cell-ink: var(--muted); }
 
-.map-block { max-width: none; }
+.chart-block.map-block { max-width: none; }
 .toggle { display: inline-flex; gap: 0; margin: 0 0 18px; border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; font-size: 14px; font-weight: 700; }
 .toggle > * { padding: 6px 14px; }
 .toggle a { text-decoration: none; color: var(--ink-2); background: var(--sheet); }
