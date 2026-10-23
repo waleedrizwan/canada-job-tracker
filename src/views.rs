@@ -468,7 +468,7 @@ pub fn page(ds: &Dataset, p: &Params) -> Markup {
                         " paying at least $"
                         label.field.money {
                             span.sr { "Minimum hourly wage" }
-                            input type="number" name="wage" min="0" max="300" step="1" placeholder="any" value=(p.wage.as_deref().unwrap_or(""));
+                            input type="number" name="wage" min="0" max="300" step="any" inputmode="decimal" placeholder="any" value=(p.wage.as_deref().unwrap_or(""));
                         }
                         " an hour, posted "
                         label.field {
@@ -611,7 +611,7 @@ pub fn page(ds: &Dataset, p: &Params) -> Markup {
                 section.listing {
                     div.listing-head {
                         h2 { "The postings" }
-                        a.download href=(export_link) download { "Download these " (thousands(n as u64)) " as a spreadsheet (CSV)" }
+                        @if n > 0 { a.download href=(export_link) download { "Download these " (thousands(n as u64)) " as a spreadsheet (CSV)" } }
                     }
                     div.table-wrap {
                         table {
