@@ -107,7 +107,10 @@ document.addEventListener("submit", (e) => {
   const url = ours(form.getAttribute("action") || "/");
   if (!url || url.pathname !== "/") return;
   e.preventDefault();
-  url.search = new URLSearchParams(new FormData(form)).toString();
+  // Leave out blank fields, so shared links stay short: ?cat=Health, not ?cat=Health&prov=&wage=…
+  const params = new URLSearchParams();
+  for (const [k, v] of new FormData(form)) if (v !== "") params.append(k, v);
+  url.search = params.toString();
   navigate(url);
 });
 
