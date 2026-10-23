@@ -155,7 +155,8 @@ pub fn filter<'a>(ds: &'a Dataset, p: &Params) -> Vec<&'a Job> {
 /// Sorts for the table. Missing wages always sort last.
 pub fn sort(ds: &Dataset, rows: &mut [&Job], key: &str, desc: bool) {
     use std::cmp::Ordering;
-    let by_str = |d: &Dict, a: usize, b: usize| d.get(a).cmp(d.get(b));
+    // Case-insensitive, so "technicien agricole" sorts with "Technician", not after "Z".
+    let by_str = |d: &Dict, a: usize, b: usize| d.lower[a].cmp(&d.lower[b]).then_with(|| d.get(a).cmp(d.get(b)));
     rows.sort_by(|a, b| {
         let o = match key {
             "title" => by_str(&ds.titles, a.title as usize, b.title as usize),
