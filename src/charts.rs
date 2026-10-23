@@ -185,7 +185,9 @@ impl Bins {
         if self.edges.is_empty() {
             return STEPS / 2;
         }
-        (1..STEPS).filter(|&k| v >= self.edges[k]).count()
+        // Strictly above an edge: when many values tie (say a run of zeros), they share the
+        // lowest step they fit rather than jumping to the top one.
+        (1..STEPS).filter(|&k| v > self.edges[k]).count()
     }
 
     /// One label per step, e.g. "$17–$24".

@@ -49,6 +49,10 @@ fn wage_range(lo: f32, hi: f32) -> String {
         format!("${lo:.2}–${hi:.2}")
     }
 }
+/// Postings per 10,000 people. Rates under 1 keep two decimals, so they don't all show as "0.0".
+fn per_10k(v: f64) -> String {
+    if v > 0.0 && v < 1.0 { format!("{v:.2}") } else { format!("{v:.1}") }
+}
 fn annual(h: f64) -> String {
     format!("≈ ${}/yr", compact(h * HOURS_PER_YEAR))
 }
@@ -225,13 +229,13 @@ pub fn page(ds: &Dataset, p: &Params) -> Markup {
         .collect();
     let map_value = |rate: Option<f64>, med: Option<f64>| if by_wage { med } else { rate };
     let map_bins = charts::Bins::new(region_stats.iter().filter_map(|(_, _, r, m)| map_value(*r, *m)));
-    let fmt_map = |v: f64| if by_wage { wage(v) } else { format!("{v:.1}") };
+    let fmt_map = |v: f64| if by_wage { wage(v) } else { per_10k(v) };
     let map_regions: Vec<Region> = region_stats
         .iter()
         .map(|(r, count, rate, med)| {
             let mut tip = format!("{}\n{} postings", r.name, thousands(*count as u64));
             if let Some(rt) = rate {
-                tip.push_str(&format!("\n{rt:.1} per 10,000 people"));
+                tip.push_str(&format!("\n{} per 10,000 people", per_10k(*rt)));
             }
             if let Some(m) = med {
                 tip.push_str(&format!("\nMedian offer {}/h", wage(*m)));
@@ -260,7 +264,7 @@ pub fn page(ds: &Dataset, p: &Params) -> Markup {
         })
         .collect();
     map_ranked.sort_by(|a, b| b.value.total_cmp(&a.value));
-    let map_legend = map_bins.labels(|v| if by_wage { format!("${v:.0}") } else { format!("{v:.0}") });
+    let map_legend = map_bins.labels(|v| if by_wage { format!("${v:.0}") } else if v >= 10.0 { format!("{v:.0}") } else { per_10k(v) });
 
     // ---- Heat grid: median offer by field × province, under every filter except those two
     let mut no_pc = p.clone();
