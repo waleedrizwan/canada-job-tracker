@@ -176,3 +176,123 @@ pub fn sort(ds: &Dataset, rows: &mut [&Job], key: &str, desc: bool) {
         if desc { o.reverse() } else { o }
     });
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::data::sample;
+
+    fn params(qs: &str) -> Params {
+        serde_urlencoded::from_str::<Params>(qs).unwrap().normalize()
+    }
+    fn ids(rows: &[&Job]) -> Vec<u32> {
+        rows.iter().map(|j| j.id).collect()
+    }
+
+    #[test]
+    fn normalize_drops_blank_and_bad_values() {
+        let p = params("cat=&prov=%20&wage=abc&q=cook");
+        assert!(p.cat.is_none() && p.prov.is_none() && p.wage.is_none());
+        assert_eq!(p.q.as_deref(), Some("cook"));
+        assert!(params("wage=0").wage.is_none());
+        assert!(params("wage=-5").wage.is_none());
+        assert_eq!(params("wage=17.5").wage.as_deref(), Some("17.5"));
+    }
+
+    #[test]
+    fn link_resets_page_and_keeps_other_filters() {
+        let p = params("prov=ON&page=4");
+        assert_eq!(p.link(|q| q.cat = Some("Health".into())), "/?cat=Health&prov=ON");
+        assert_eq!(Params::default().link(|_| {}), "/");
+    }
+
+    #[test]
+    fn page_and_sort_defaults() {
+        assert_eq!(params("page=abc").page(), 1);
+        assert_eq!(params("page=0").page(), 1);
+        assert_eq!(params("page=3").page(), 3);
+        let p = params("");
+        assert_eq!(p.sort_key(), "posted");
+        assert!(p.descending(), "newest first by default");
+        assert!(!params("sort=title").descending(), "a chosen column sorts ascending unless told otherwise");
+        assert!(params("sort=wage&dir=desc").descending());
+    }
+
+    #[test]
+    fn toggle_sets_and_clears() {
+        let mut slot = None;
+        toggle(&mut slot, "ON");
+        assert_eq!(slot.as_deref(), Some("ON"));
+        toggle(&mut slot, "BC");
+        assert_eq!(slot.as_deref(), Some("BC"));
+        toggle(&mut slot, "BC");
+        assert_eq!(slot, None);
+    }
+
+    #[test]
+    fn parses_months() {
+        assert_eq!(parse_month("2026-09"), Some((2026, 9)));
+        assert_eq!(parse_month("garbage"), None);
+        assert_eq!(parse_month("2026-xx"), None);
+    }
+
+    #[test]
+    fn filters_by_each_field() {
+        let ds = sample();
+        assert_eq!(filter(&ds, &params("")).len(), 5);
+        assert_eq!(ids(&filter(&ds, &params("prov=BC"))), [2, 4]);
+        assert_eq!(ids(&filter(&ds, &params("cat=Health"))), [2, 5]);
+        assert_eq!(ids(&filter(&ds, &params("city=Toronto%2C+ON"))), [1, 3, 5]);
+        assert_eq!(ids(&filter(&ds, &params("hours=Part+time"))), [2]);
+        assert_eq!(ids(&filter(&ds, &params("term=Unspecified"))), [2, 4]);
+        assert_eq!(ids(&filter(&ds, &params("src=Partner+job+boards"))), [2, 4]);
+        assert_eq!(ids(&filter(&ds, &params("month=2026-08"))), [3, 4]);
+        assert_eq!(ids(&filter(&ds, &params("prov=ON&cat=Health"))), [5]);
+    }
+
+    #[test]
+    fn minimum_wage_uses_midpoint_and_skips_unpaid() {
+        let ds = sample();
+        // Midpoints: 18, 45, 35, none, 45.5
+        assert_eq!(ids(&filter(&ds, &params("wage=35"))), [2, 3, 5]);
+        assert_eq!(ids(&filter(&ds, &params("wage=45.25"))), [5]);
+    }
+
+    #[test]
+    fn search_matches_title_or_occupation_case_insensitively() {
+        let ds = sample();
+        assert_eq!(ids(&filter(&ds, &params("q=NURSE"))), [2, 5]);
+        assert_eq!(ids(&filter(&ds, &params("q=cook"))), [1, 4], "title \"Cook\" and occupation \"Cooks\"");
+        assert!(filter(&ds, &params("q=astronaut")).is_empty());
+    }
+
+    #[test]
+    fn unknown_values_match_nothing() {
+        let ds = sample();
+        assert!(filter(&ds, &params("prov=XX")).is_empty());
+        assert!(filter(&ds, &params("cat=Nope")).is_empty());
+    }
+
+    #[test]
+    fn sorts_and_keeps_missing_wages_last() {
+        let ds = sample();
+        let mut rows = filter(&ds, &params(""));
+        sort(&ds, &mut rows, "wage", false);
+        assert_eq!(ids(&rows), [1, 3, 2, 5, 4]);
+        sort(&ds, &mut rows, "wage", true);
+        assert_eq!(ids(&rows), [5, 2, 3, 1, 4], "missing wages stay last when descending");
+        sort(&ds, &mut rows, "posted", true);
+        assert_eq!(ids(&rows), [1, 2, 3, 4, 5]);
+        sort(&ds, &mut rows, "vacancies", true);
+        assert_eq!(ids(&rows)[0], 4);
+    }
+
+    #[test]
+    fn text_sort_ignores_case() {
+        let ds = sample();
+        let mut rows = filter(&ds, &params(""));
+        sort(&ds, &mut rows, "title", false);
+        let titles: Vec<&str> = rows.iter().map(|j| ds.titles.get(j.title as usize)).collect();
+        assert_eq!(titles, ["Cook", "Electrician", "Line Cook, Nights", "registered nurse", "registered nurse"]);
+    }
+}

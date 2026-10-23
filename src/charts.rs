@@ -284,3 +284,73 @@ pub fn steps_legend(labels: &[String]) -> Markup {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compact_numbers() {
+        assert_eq!(compact(0.0), "0");
+        assert_eq!(compact(950.4), "950");
+        assert_eq!(compact(1_000.0), "1k");
+        assert_eq!(compact(15_500.0), "15.5k");
+        assert_eq!(compact(2_000_000.0), "2M");
+        assert_eq!(compact(1_250_000.0), "1.2M");
+    }
+
+    #[test]
+    fn nice_axis_maximum() {
+        assert_eq!(nice_max(0.0), 1.0);
+        assert_eq!(nice_max(7.0), 10.0);
+        assert_eq!(nice_max(19_400.0), 20_000.0);
+        assert_eq!(nice_max(2_100.0), 2_500.0);
+        assert_eq!(nice_max(500.0), 500.0);
+    }
+
+    #[test]
+    fn bins_spread_values_over_steps() {
+        let b = Bins::new((1..=10).map(f64::from));
+        assert_eq!(b.step(1.0), 0);
+        assert_eq!(b.step(10.0), STEPS - 1);
+        let steps: Vec<usize> = (1..=10).map(|v| b.step(v as f64)).collect();
+        assert!(steps.windows(2).all(|w| w[0] <= w[1]), "steps never go down as values rise: {steps:?}");
+        assert_eq!(b.labels(|v| format!("{v}")).len(), STEPS);
+        assert_eq!(b.labels(|v| format!("{v}"))[0], "1–3");
+    }
+
+    #[test]
+    fn tied_values_share_the_lowest_step() {
+        // Most provinces with no postings: the zeros must not take the darkest shade.
+        let b = Bins::new([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.01, 0.02].into_iter());
+        assert_eq!(b.step(0.0), 0);
+        assert_eq!(b.step(0.02), STEPS - 1);
+    }
+
+    #[test]
+    fn empty_bins_are_safe() {
+        let b = Bins::new(std::iter::empty());
+        assert_eq!(b.step(5.0), STEPS / 2);
+        assert!(b.labels(|v| format!("{v}")).is_empty());
+        let b = Bins::new([f64::NAN, f64::INFINITY].into_iter());
+        assert!(b.labels(|v| format!("{v}")).is_empty(), "non-finite values are ignored");
+    }
+
+    #[test]
+    fn empty_charts_say_so() {
+        assert!(hbar(&[], "x").into_string().contains("No postings match"));
+        let zeros = [Bin { label: "a".into(), value: 0.0, tip: String::new() }];
+        assert!(vbar(&zeros, 1, "x").into_string().contains("No postings match"));
+    }
+
+    #[test]
+    fn bars_scale_to_the_largest_and_link() {
+        let bar = |label: &str, value: f64, href: Option<&str>| Bar {
+            label: label.into(), value, display: value.to_string(), tip: String::new(), href: href.map(Into::into), active: label == "b",
+        };
+        let html = hbar(&[bar("a", 200.0, Some("/?x=a")), bar("b", 50.0, None)], "chart").into_string();
+        assert!(html.contains("width:100.00%") && html.contains("width:25.00%"));
+        assert!(html.contains(r#"href="/?x=a""#));
+        assert!(html.contains(r#"class="active""#) && html.contains(r#"class="dim""#));
+    }
+}

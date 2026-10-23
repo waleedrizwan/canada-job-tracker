@@ -391,3 +391,130 @@ pub async fn download(files: Vec<MonthFile>, bench: Result<Benchmark>) -> Result
         rows,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn converts_pay_to_hourly() {
+        assert_eq!(hourly(Some("Hour"), Some("17.5"), None, None), Some(17.5));
+        assert_eq!(hourly(Some("Year"), Some("52000"), None, None), Some(25.0));
+        assert_eq!(hourly(Some("Day"), Some("200"), None, None), Some(25.0));
+        assert_eq!(hourly(Some("Week"), Some("1000"), None, None), Some(25.0), "40 hours when none are given");
+        assert_eq!(hourly(Some("Week"), Some("1000"), Some("Week"), Some("20")), Some(50.0), "the posting's own hours");
+        assert_eq!(hourly(Some("Bi-weekly"), Some("2000"), None, None), Some(25.0));
+        assert_eq!(hourly(Some("Month"), Some("4000"), None, None), Some(23.08));
+    }
+
+    #[test]
+    fn rejects_implausible_or_missing_pay() {
+        assert_eq!(hourly(Some("Hour"), Some("5"), None, None), None, "under $10/h");
+        assert_eq!(hourly(Some("Hour"), Some("500"), None, None), None, "over $300/h");
+        assert_eq!(hourly(Some("Hour"), Some("0"), None, None), None);
+        assert_eq!(hourly(Some("Hour"), Some("abc"), None, None), None);
+        assert_eq!(hourly(Some("Fortnight"), Some("2000"), None, None), None);
+        assert_eq!(hourly(None, Some("20"), None, None), None);
+    }
+
+    #[test]
+    fn treats_placeholders_as_missing() {
+        assert_eq!(na(Some(" Ontario ")), Some("Ontario"));
+        assert_eq!(na(Some("NA")), None);
+        assert_eq!(na(Some("")), None);
+        assert_eq!(na(Some("**suppressed")), None);
+        assert_eq!(na(None), None);
+    }
+
+    #[test]
+    fn title_cases_words() {
+        assert_eq!(title_case("line cook"), "Line Cook");
+        assert_eq!(title_case("cook-chef (nights)"), "Cook-Chef (Nights)");
+        assert_eq!(title_case("élève"), "Élève");
+    }
+
+    #[test]
+    fn quarters_from_reference_periods() {
+        assert_eq!(quarter("2026-04-01"), "Q2 2026");
+        assert_eq!(quarter("2025-12-01"), "Q4 2025");
+        assert_eq!(quarter(""), "Q1 ?");
+    }
+
+    const HEADER: [&str; 15] = [
+        "WIC Job Location Snapshot ID", "Job Title", "Original Job Title", "NOC21 Code", "NOC21 Code Name", "Province/Territory", "City",
+        "Employment Type", "Employment Term", "Salary Minimum", "Salary Maximum", "Salary Per", "First Posting Date", "Vacancy Count",
+        "External Indicator",
+    ];
+
+    fn parse(fields: [&str; 15], d: &mut Dicts) -> Option<RawRow> {
+        let cols = Columns(HEADER.iter().enumerate().map(|(i, h)| (h.to_string(), i)).collect());
+        parse_line(&cols, &fields.join("\t"), d)
+    }
+
+    #[test]
+    fn parses_a_job_bank_row() {
+        let mut d = Dicts::default();
+        let row = parse(
+            ["42", "COOK", "Line Cook", "63200", "Cooks", "Ontario", "Etobicoke", "Part time leading to full time", "Permanent employment",
+             "20", "18", "Hour", "2026/09/30", "3", "1"],
+            &mut d,
+        )
+        .unwrap();
+        let text = |col: &str, i: u32| d.0[col].values[i as usize].clone();
+        assert_eq!(row.0, 42);
+        assert_eq!(text("title", row.1), "Line Cook", "the original title wins");
+        assert_eq!(text("category", row.3), "Sales & service", "NOC first digit 6");
+        assert_eq!(text("level", row.4), "TEER 3 · College / apprenticeship (<2 yrs)", "NOC second digit 3");
+        assert_eq!(text("city", row.5), "Toronto, ON", "Etobicoke is part of Toronto");
+        assert_eq!(text("province", row.6), "ON");
+        assert_eq!(text("employmentType", row.7), "Part time → full time");
+        assert_eq!(text("term", row.8), "Permanent");
+        assert_eq!((row.9, row.10), (Some(20.0), Some(20.0)), "a maximum below the minimum is raised to it");
+        assert_eq!(row.11, "2026-09-30");
+        assert_eq!(row.12, 3);
+        assert_eq!(text("source", row.13), "Partner job boards");
+    }
+
+    #[test]
+    fn fills_in_missing_fields() {
+        let mut d = Dicts::default();
+        let row = parse(
+            ["x", "electrician", "NA", "", "", "Québec", "", "", "", "", "", "", "2026-08-01", "0", "0"],
+            &mut d,
+        )
+        .unwrap();
+        let text = |col: &str, i: u32| d.0[col].values[i as usize].clone();
+        assert_eq!(row.0, 0);
+        assert_eq!(text("title", row.1), "Electrician", "falls back to the title-cased Job Title");
+        assert_eq!(text("occupation", row.2), "Unclassified");
+        assert_eq!(text("category", row.3), "Unclassified");
+        assert_eq!(text("city", row.5), "Not given");
+        assert_eq!(text("province", row.6), "QC");
+        assert_eq!(text("employmentType", row.7), "Unspecified");
+        assert_eq!((row.9, row.10), (None, None));
+        assert_eq!(row.12, 1, "at least one opening");
+        assert_eq!(text("source", row.13), "Posted on Job Bank");
+    }
+
+    #[test]
+    fn skips_rows_without_a_known_province_or_date() {
+        let mut d = Dicts::default();
+        let base = ["1", "Cook", "", "63200", "Cooks", "Ontario", "", "", "", "", "", "", "2026-08-01", "1", "0"];
+        let mut abroad = base;
+        abroad[5] = "Outside Canada";
+        assert!(parse(abroad, &mut d).is_none());
+        let mut undated = base;
+        undated[12] = "NA";
+        assert!(parse(undated, &mut d).is_none());
+        assert!(parse(base, &mut d).is_some());
+    }
+
+    #[test]
+    fn interns_repeated_text_once() {
+        let mut d = Dicts::default();
+        assert_eq!(d.id("city", "Regina, SK"), 0);
+        assert_eq!(d.id("city", "Moose Jaw, SK"), 1);
+        assert_eq!(d.id("city", "Regina, SK"), 0);
+        assert_eq!(d.0["city"].values.len(), 2);
+    }
+}

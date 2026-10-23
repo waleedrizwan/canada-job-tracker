@@ -720,3 +720,98 @@ pub fn csv(ds: &Dataset, p: &Params) -> String {
     }
     out
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::data::sample;
+
+    fn params(qs: &str) -> Params {
+        serde_urlencoded::from_str::<Params>(qs).unwrap().normalize()
+    }
+
+    #[test]
+    fn formats_numbers() {
+        assert_eq!(thousands(0), "0");
+        assert_eq!(thousands(999), "999");
+        assert_eq!(thousands(1_000), "1,000");
+        assert_eq!(thousands(158_166), "158,166");
+        assert_eq!(thousands(1_234_567), "1,234,567");
+        assert_eq!(pct(1, 3), "33%");
+        assert_eq!(pct(1, 0), "–");
+        assert_eq!(per_10k(25.06), "25.1");
+        assert_eq!(per_10k(0.0153), "0.02");
+        assert_eq!(per_10k(0.0), "0.0");
+    }
+
+    #[test]
+    fn formats_wage_ranges() {
+        assert_eq!(wage_range(17.0, 23.0), "$17–$23");
+        assert_eq!(wage_range(16.6, 28.0), "$16.60–$28.00");
+        assert_eq!(wage_range(25.53, 25.53), "$25.53");
+        assert_eq!(wage_range(32.0, 32.0), "$32");
+    }
+
+    #[test]
+    fn median_of_odd_even_and_empty() {
+        assert_eq!(median(&mut [3.0, 1.0, 2.0]), Some(2.0));
+        assert_eq!(median(&mut [4.0, 1.0, 2.0, 3.0]), Some(2.5));
+        assert_eq!(median(&mut []), None);
+    }
+
+    #[test]
+    fn csv_has_header_province_and_quoting() {
+        let ds = sample();
+        let out = csv(&ds, &params("sort=posted&dir=desc"));
+        let lines: Vec<&str> = out.lines().collect();
+        assert_eq!(lines[0], "id,title,occupation,category,skill_level,city,province,hours,term,wage_min_hourly,wage_max_hourly,openings,posted,source");
+        assert_eq!(lines.len(), 6);
+        assert!(lines[1].starts_with("1,Cook,Cooks,"));
+        // A title with a comma is quoted; a posting with no city keeps its province.
+        let nights = lines.iter().find(|l| l.starts_with("4,")).unwrap();
+        assert!(nights.contains(r#""Line Cook, Nights""#), "{nights}");
+        assert!(nights.contains("Not given,BC,"), "{nights}");
+        assert_eq!(csv(&ds, &params("prov=XX")).lines().count(), 1, "just the header when nothing matches");
+    }
+
+    #[test]
+    fn csv_filename_uses_data_date() {
+        assert_eq!(csv_filename(&sample()), "canada-jobs-2026-09-30.csv");
+    }
+
+    #[test]
+    fn page_renders_the_answer_and_table() {
+        let ds = sample();
+        let html = page(&ds, &params("")).into_string();
+        assert!(html.contains("<title>Canada Job Tracker</title>"));
+        assert!(html.contains("<strong>5</strong> postings for <strong>8</strong> openings"), "summary sentence");
+        assert!(html.contains("Half offer <strong>$40.00 an hour</strong> or more"), "median of 18, 35, 45, 45.5");
+        assert!(html.contains("Not given, BC"), "a posting with no city shows its province");
+        assert!(html.contains("Download these 5"));
+        assert!(html.contains("Page 1 of 1"));
+    }
+
+    #[test]
+    fn page_with_no_matches_explains_and_hides_download() {
+        let html = page(&sample(), &params("prov=ON&wage=290")).into_string();
+        assert!(html.contains("No postings match."));
+        assert!(!html.contains("Download these"));
+        assert!(html.contains("Start over"));
+    }
+
+    #[test]
+    fn page_keeps_filters_in_the_form() {
+        let html = page(&sample(), &params("prov=BC&wage=20&hours=Part+time")).into_string();
+        assert!(html.contains(r#"<option value="BC" selected>"#));
+        assert!(html.contains(r#"value="20""#));
+        assert!(html.contains("<details class=\"more\" open"), "more filters stay open when one is set");
+        assert!(html.contains("<strong>1</strong> posting for <strong>1</strong> opening."), "singular wording");
+    }
+
+    #[test]
+    fn out_of_range_page_shows_the_last() {
+        let html = page(&sample(), &params("page=9")).into_string();
+        assert!(html.contains("Page 1 of 1"), "an out-of-range page shows the last page");
+        assert!(!html.contains("rel=\"next\"") && !html.contains("rel=\"prev\""));
+    }
+}
