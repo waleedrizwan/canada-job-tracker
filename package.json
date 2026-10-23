@@ -1,13 +1,16 @@
 {
 	"name": "canada-job-tracker-site",
-	"description": "Cloudflare tooling for the static site (see wrangler.jsonc)",
+	"description": "Cloudflare tooling and browser tests for the static site (see wrangler.jsonc and playwright.config.js)",
 	"private": true,
 	"scripts": {
 		"build": "sh tools/build-site.sh",
 		"dev": "wrangler dev --port 8787",
+		"test": "cargo test && npm run build && playwright test",
+		"test:e2e": "playwright test",
 		"deploy": "sh tools/build-site.sh && wrangler deploy"
 	},
 	"devDependencies": {
+		"@playwright/test": "1.64.1",
 		"wrangler": "4.152.0"
 	}
 }
