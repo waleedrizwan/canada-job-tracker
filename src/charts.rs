@@ -205,10 +205,11 @@ pub struct Region {
     pub active: bool,
 }
 
-/// Map label anchors, placed by eye. The three Maritime provinces are too small to label.
+/// Map label anchors, placed so each label sits wholly inside its province (the label's colour
+/// depends on the province's shade). The three Maritime provinces are too small to label.
 const LABELS: [(&str, f64, f64); 10] = [
-    ("BC", 76.0, 470.0), ("AB", 152.0, 520.0), ("SK", 271.0, 515.0), ("MB", 332.0, 520.0), ("ON", 470.0, 625.0),
-    ("QC", 590.0, 545.0), ("NL", 700.0, 478.0), ("NU", 382.0, 300.0), ("NT", 192.0, 335.0), ("YT", 122.0, 300.0),
+    ("BC", 76.0, 470.0), ("AB", 152.0, 520.0), ("SK", 250.0, 500.0), ("MB", 332.0, 520.0), ("ON", 440.0, 560.0),
+    ("QC", 590.0, 545.0), ("NL", 655.0, 430.0), ("NU", 382.0, 300.0), ("NT", 192.0, 335.0), ("YT", 85.0, 250.0),
 ];
 
 /// Choropleth of Canada. Each province is a link; hover shows its numbers.
