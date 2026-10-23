@@ -369,8 +369,11 @@ pub fn page(ds: &Dataset, p: &Params) -> Markup {
     };
     let page_link = |n: usize| {
         let mut q = p.clone();
-        q.page = Some(n.to_string());
-        format!("/?{}", serde_urlencoded::to_string(&q).unwrap_or_default())
+        q.page = (n > 1).then(|| n.to_string());
+        match serde_urlencoded::to_string(&q) {
+            Ok(qs) if !qs.is_empty() => format!("/?{qs}"),
+            _ => "/".into(),
+        }
     };
     let export_link = p.link(|_| {}).replacen('/', "/export.csv", 1);
 
@@ -506,7 +509,7 @@ pub fn page(ds: &Dataset, p: &Params) -> Markup {
                             strong { (thousands(n as u64)) } (if n == 1 { " posting" } else { " postings" }) " for "
                             strong { (thousands(vacancies)) } (if vacancies == 1 { " opening" } else { " openings" }) "."
                             @if let Some(m) = med {
-                                " Half offer more than " strong { (wage(m)) " an hour" } ", or about $" (thousands(((m * HOURS_PER_YEAR) / 1000.0).round() as u64 * 1000)) " a year full time."
+                                " Half offer " strong { (wage(m)) " an hour" } " or more, about $" (thousands(((m * HOURS_PER_YEAR) / 1000.0).round() as u64 * 1000)) " a year full time."
                             }
                         }
                         p.detail {
@@ -540,7 +543,7 @@ pub fn page(ds: &Dataset, p: &Params) -> Markup {
                     }
                     section.chart-block.wide {
                         h2 { "What does each field pay, province by province?" }
-                        p.hint { "Median hourly offer for each kind of work. Darker means higher. Click a square to see those jobs; a dash means fewer than 10 postings listed pay." }
+                        p.hint { "Median hourly offer for each kind of work; the key below gives the ranges. Click a square to see those jobs. A dash means fewer than 10 postings listed pay." }
                         (charts::heat_grid(&heat_cols, &heat, "Median hourly offer by field and province"))
                         (charts::steps_legend(&heat_legend))
                     }
@@ -688,9 +691,9 @@ pub fn csv_filename(ds: &Dataset) -> String {
 pub fn csv(ds: &Dataset, p: &Params) -> String {
     let mut rows = query::filter(ds, p);
     query::sort(ds, &mut rows, p.sort_key(), p.descending());
-    let cell = |s: &str| if s.contains([',', '"', '\n']) { format!("\"{}\"", s.replace('"', "\"\"")) } else { s.to_string() };
+    let cell = |s: &str| if s.contains([',', '"', '\n', '\r']) { format!("\"{}\"", s.replace('"', "\"\"")) } else { s.to_string() };
     let opt = |v: Option<f32>| v.map(|v| v.to_string()).unwrap_or_default();
-    let mut out = String::from("id,title,occupation,category,skill_level,city,hours,term,wage_min_hourly,wage_max_hourly,openings,posted,source\n");
+    let mut out = String::from("id,title,occupation,category,skill_level,city,province,hours,term,wage_min_hourly,wage_max_hourly,openings,posted,source\n");
     for j in rows {
         let fields = [
             j.id.to_string(),
@@ -699,6 +702,7 @@ pub fn csv(ds: &Dataset, p: &Params) -> String {
             cell(ds.categories.get(j.category as usize)),
             cell(ds.levels.get(j.level as usize)),
             cell(ds.cities.get(j.city as usize)),
+            cell(ds.provinces.get(j.province as usize)),
             cell(ds.hours.get(j.hours as usize)),
             cell(ds.terms.get(j.term as usize)),
             opt(j.wage_min),
