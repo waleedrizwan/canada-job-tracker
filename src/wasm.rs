@@ -58,7 +58,7 @@ pub unsafe extern "C" fn load(ptr: *mut u8, len: usize) -> bool {
 
 /// Runs `f` on the dataset with the view a query string (without the "?") asks for.
 fn with_query(qs: &[u8], f: impl FnOnce(&Dataset, &Params) -> String) {
-    // The server answers a malformed query with an error; here it falls back to the default view.
+    // A malformed query gets the default view, as on the server.
     let p = serde_urlencoded::from_bytes::<Params>(qs).unwrap_or_default().normalize();
     set_out(DATA.with_borrow(|ds| ds.as_ref().map(|ds| f(ds, &p))).unwrap_or_default());
 }

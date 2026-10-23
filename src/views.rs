@@ -434,6 +434,7 @@ pub fn page(ds: &Dataset, p: &Params) -> Markup {
                 link rel="preconnect" href="https://fonts.gstatic.com" crossorigin;
                 link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Next:ital,wght@0,400;0,500;0,700;0,800;1,400&display=swap";
                 link rel="stylesheet" href=(format!("/styles.css?v={}", crate::styles_version()));
+                link rel="icon" href=(FAVICON);
             }
             body {
                 header.masthead {
@@ -686,6 +687,35 @@ pub fn page(ds: &Dataset, p: &Params) -> Markup {
     }
 }
 
+/// A pine square with a highlighter bar, inline so it costs no request.
+const FAVICON: &str = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230e7a57'/%3E%3Crect x='7' y='19' width='18' height='5' fill='%23ffe86b'/%3E%3C/svg%3E";
+
+/// The server's page for an unknown address. (The static site shows the dashboard for every path.)
+pub fn not_found() -> Markup {
+    html! {
+        (DOCTYPE)
+        html lang="en-CA" {
+            head {
+                meta charset="utf-8";
+                meta name="viewport" content="width=device-width, initial-scale=1";
+                title { "Page not found · Canada Job Tracker" }
+                link rel="preconnect" href="https://fonts.googleapis.com";
+                link rel="preconnect" href="https://fonts.gstatic.com" crossorigin;
+                link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Next:ital,wght@0,400;0,500;0,700;0,800;1,400&display=swap";
+                link rel="stylesheet" href=(format!("/styles.css?v={}", crate::styles_version()));
+                link rel="icon" href=(FAVICON);
+            }
+            body {
+                header.masthead { a.wordmark href="/" { "Canada Job Tracker" } }
+                section.answer {
+                    p.lead { "There's no page at this address." }
+                    p { a href="/" { "Go to the dashboard" } }
+                }
+            }
+        }
+    }
+}
+
 /// The download name for `csv`.
 pub fn csv_filename(ds: &Dataset) -> String {
     format!("canada-jobs-{}.csv", ds.as_of)
@@ -806,6 +836,13 @@ mod tests {
         assert!(html.contains(r#"value="20""#));
         assert!(html.contains("<details class=\"more\" open"), "more filters stay open when one is set");
         assert!(html.contains("<strong>1</strong> posting for <strong>1</strong> opening."), "singular wording");
+    }
+
+    #[test]
+    fn not_found_page_links_home() {
+        let html = not_found().into_string();
+        assert!(html.contains("<title>Page not found · Canada Job Tracker</title>"));
+        assert!(html.contains(r#"<a href="/">Go to the dashboard</a>"#));
     }
 
     #[test]
