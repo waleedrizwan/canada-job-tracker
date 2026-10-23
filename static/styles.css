@@ -7,7 +7,7 @@
   --sheet: #ffffff;
   --ink: #142a24;
   --ink-2: #48605a;
-  --muted: #6f837c;
+  --muted: #5b6f68;
   --rule: #dce5e1;
   --pine: #0e7a57;
   --pine-deep: #0a5c41;
@@ -19,7 +19,7 @@
   --q0: #d6ebe2;
   --q1: #a6d2c0;
   --q2: #6db59a;
-  --q3: #2f8f6c;
+  --q3: #2a8565;
   --q4: #0b5f43;
   --q-ink-light: #142a24;
   --q-ink-dark: #ffffff;
@@ -274,8 +274,8 @@ a.bar-row:hover .label { color: var(--ink); text-decoration: underline; }
 .q3 { --fill: var(--q3); --cell-ink: var(--q-ink-dark); }
 .q4 { --fill: var(--q4); --cell-ink: var(--q-ink-dark); }
 @media (prefers-color-scheme: dark) {
-  .q2, .q3 { --cell-ink: var(--q-ink-light); }
-  .q4 { --cell-ink: var(--q-ink-dark); }
+  .q2 { --cell-ink: var(--q-ink-light); }
+  .q3, .q4 { --cell-ink: var(--q-ink-dark); }
 }
 .nodata { --fill: var(--nodata); --cell-ink: var(--muted); }
 
