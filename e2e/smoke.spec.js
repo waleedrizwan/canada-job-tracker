@@ -24,9 +24,10 @@ test("the jobs tab shows a search and a grid of postings", async ({ page }) => {
   await expect(page).toHaveTitle("Canada Job Tracker");
   await expect(page.getByRole("link", { name: "Jobs", exact: true })).toHaveAttribute("aria-current", "page");
   await expect(page.locator("form.search input[name=q]")).toBeVisible();
-  await expect(page.locator("form.search select")).toHaveCount(0);
+  await expect(page.locator("details.advanced")).not.toHaveAttribute("open", "");
+  await expect(page.locator("details.advanced select[name=prov]")).toBeHidden();
   await expect(page.locator(".cards .card")).toHaveCount(48);
-  await expect(page.locator(".card").first().locator(".card-pay")).toHaveText(/^\$[\d.]+|Pay not listed/);
+  await expect(page.locator(".job").first().locator(".card-pay")).toHaveText(/^\$[\d.]+|Pay not listed/);
   await expect(page.locator(".pager .where")).toHaveText(/^Page 1 of [\d,]+$/);
   expect(errors).toEqual([]);
 });
@@ -44,6 +45,19 @@ test("searching, the pager, the tabs, the back button and the CSV work in the br
   await settled(page);
   await expect(count).not.toHaveText(everything);
   await expect(page.locator(".count")).toContainText("matching “nurse”");
+
+  // Advanced filters open under the search and narrow it further; blank ones stay out of the URL.
+  await page.locator("details.advanced summary").click();
+  await page.selectOption("details.advanced select[name=prov]", "BC");
+  await page.getByRole("button", { name: "Apply filters" }).click();
+  await expect(page).toHaveURL("/?q=nurse&prov=BC");
+  await settled(page);
+  await expect(page.locator("details.advanced summary .badge")).toHaveText("1");
+  await expect(page.locator(".card-loc").first()).toHaveText(/(, BC|British Columbia)$/);
+  await page.locator("details.advanced summary").click();
+  await page.getByRole("link", { name: "Clear filters" }).click();
+  await expect(page).toHaveURL("/?q=nurse");
+  await settled(page);
 
   await page.locator(".pager a[rel=next]").click();
   await expect(page).toHaveURL("/?q=nurse&page=2#results");
@@ -88,7 +102,7 @@ test("a search with no matches says so", async ({ page }) => {
   await page.goto("/?q=zzzzqqq");
   await settled(page);
   await expect(page.locator(".results")).toContainText("No jobs match.");
-  await expect(page.locator(".card")).toHaveCount(0);
+  await expect(page.locator(".job")).toHaveCount(0);
   await expect(page.locator("a.download")).toHaveCount(0);
   // The charts tab: a wage that isn't one of the choices still shows as selected.
   await page.goto("/?view=charts&prov=NU&wage=290");
@@ -110,7 +124,7 @@ test("fits a phone screen", async ({ browser }) => {
   // Cards stack in one column, each fully on screen.
   await page.goto("/?prov=ON");
   await settled(page);
-  const box = await page.locator(".card").first().boundingBox();
+  const box = await page.locator(".job").first().boundingBox();
   expect(box.x).toBeGreaterThanOrEqual(0);
   expect(box.x + box.width).toBeLessThanOrEqual(390);
   expect(errors).toEqual([]);

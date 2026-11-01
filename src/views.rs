@@ -311,11 +311,8 @@ fn jobs_view(ds: &Dataset, p: &Params) -> Markup {
     let cur = p.page().min(pages);
     let slice = &rows[(cur - 1) * PAGE_SIZE..(cur * PAGE_SIZE).min(n)];
     let chips = chips(p);
-    // The search keeps any other filters, so searching within a heatmap square stays in it.
-    let mut keep = p.clone();
-    keep.q = None;
-    keep.page = None;
-    let hidden: Vec<(String, String)> = serde_urlencoded::to_string(&keep).ok().and_then(|qs| serde_urlencoded::from_str(&qs).ok()).unwrap_or_default();
+    // Clearing the advanced filters keeps the search.
+    let clear_link = Params { q: p.q.clone(), ..Default::default() }.link(|_| {});
     let export_link = p.link(|_| {}).replacen('/', "/export.csv", 1);
 
     html! {
@@ -325,7 +322,26 @@ fn jobs_view(ds: &Dataset, p: &Params) -> Markup {
                 input #q.form-control type="search" name="q" placeholder="Search job titles, like nurse or electrician" value=(p.q.as_deref().unwrap_or("")) autocomplete="off";
                 button.btn.btn-primary type="submit" { "Search" }
             }
-            @for (k, v) in &hidden { input type="hidden" name=(k) value=(v); }
+            // A native disclosure, so it opens without JavaScript. The dropdowns are part of this
+            // form, so searching keeps them, as it keeps a heatmap square's filters.
+            details.advanced.mt-2 {
+                summary.btn.btn-sm.btn-outline-secondary.dropdown-toggle {
+                    "Advanced filters"
+                    @if !chips.is_empty() { " " span.badge.text-bg-primary { (chips.len()) } }
+                }
+                div.card.card-body.mt-2 {
+                    div.row.g-3.align-items-end {
+                        (filter_dropdowns(ds, p))
+                        div.col-12.d-flex.align-items-center.gap-2 {
+                            button.btn.btn-primary type="submit" { "Apply filters" }
+                            @if !chips.is_empty() { a.btn.btn-link href=(clear_link) { "Clear filters" } }
+                        }
+                    }
+                }
+            }
+            @if let Some(s) = &p.sort { input type="hidden" name="sort" value=(s); }
+            @if let Some(d) = &p.dir { input type="hidden" name="dir" value=(d); }
+            @if let Some(m) = &p.map { input type="hidden" name="map" value=(m); }
         }
         @if !chips.is_empty() {
             div.chips.d-flex.flex-wrap.gap-2.mb-3 aria-label="Filters" {
@@ -563,10 +579,56 @@ fn kpi(label: &str, value: Markup, sub: Option<String>) -> Markup {
     }
 }
 
+/// The dropdown filters, one Bootstrap column each, for the Charts tab's form and the Jobs tab's
+/// advanced filters.
+fn filter_dropdowns(ds: &Dataset, p: &Params) -> Markup {
+    let all: Vec<&Job> = ds.jobs.iter().collect();
+    let months: Vec<(String, String)> = {
+        let mut m: Vec<(i32, u32)> = ds.jobs.iter().map(|j| j.month()).collect::<std::collections::BTreeSet<_>>().into_iter().collect();
+        m.reverse();
+        m.into_iter().map(|ym| (format!("{}-{:02}", ym.0, ym.1), month_name(ym))).collect()
+    };
+    let opts = |dict: &Dict, key: fn(&Job) -> usize, alpha: bool| sorted_values(count_by(&all, dict, key), dict, alpha);
+    let cities: Vec<String> = {
+        let prov_id = p.prov.as_deref().and_then(|c| ds.provinces.find(c));
+        let pool: Vec<&Job> = match prov_id {
+            Some(pi) => ds.jobs.iter().filter(|j| j.province as usize == pi).collect(),
+            None => all.clone(),
+        };
+        let mut c: Vec<String> = count_by(&pool, &ds.cities, |j| j.city as usize)
+            .into_iter()
+            .take(if prov_id.is_some() { usize::MAX } else { 300 })
+            .map(|(i, _)| ds.cities.get(i).to_string())
+            .filter(|c| c != "Not given")
+            .collect();
+        if let Some(cur) = &p.city {
+            if !c.contains(cur) && cur != "Not given" {
+                c.push(cur.clone());
+            }
+        }
+        c.sort();
+        c.push("Not given".into());
+        c
+    };
+    let provinces: Vec<(String, String)> = REGIONS.iter().map(|r| (r.code.to_string(), r.name.to_string())).collect();
+
+    html! {
+        (dropdown("cat", "Category", "All categories", &same(opts(&ds.categories, |j| j.category as usize, true)), &p.cat))
+        (dropdown("prov", "Province or territory", "All of Canada", &provinces, &p.prov))
+        (dropdown("city", if p.prov.is_some() { "City" } else { "City (busiest 300)" }, "Any city", &same(cities), &p.city))
+        (dropdown("occ", "Occupation", "Any occupation", &same(opts(&ds.occupations, |j| j.occupation as usize, true)), &p.occ))
+        (dropdown("wage", "Minimum hourly offer", "Any wage", &wage_options(&p.wage), &p.wage))
+        (dropdown("month", "Month posted", "Any month", &months, &p.month))
+        (dropdown("level", "Training needed", "Any training", &same(opts(&ds.levels, |j| j.level as usize, true)), &p.level))
+        (dropdown("hours", "Hours", "Any hours", &same(opts(&ds.hours, |j| j.hours as usize, false)), &p.hours))
+        (dropdown("term", "Term", "Any term", &same(opts(&ds.terms, |j| j.term as usize, false)), &p.term))
+        (dropdown("src", "Advertised on", "Anywhere", &same(opts(&ds.sources, |j| j.source as usize, false)), &p.src))
+    }
+}
+
 /// The charts tab: dropdown filters, summary figures and the rest of the charts.
 fn charts_view(ds: &Dataset, p: &Params) -> Markup {
     let rows = query::filter(ds, p);
-    let all: Vec<&Job> = ds.jobs.iter().collect();
     let n = rows.len();
 
     // ---- KPIs
@@ -703,36 +765,7 @@ fn charts_view(ds: &Dataset, p: &Params) -> Markup {
         v
     });
 
-    // ---- Filter options
-    let months: Vec<(String, String)> = {
-        let mut m: Vec<(i32, u32)> = ds.jobs.iter().map(|j| j.month()).collect::<std::collections::BTreeSet<_>>().into_iter().collect();
-        m.reverse();
-        m.into_iter().map(|ym| (format!("{}-{:02}", ym.0, ym.1), month_name(ym))).collect()
-    };
-    let opts = |dict: &Dict, key: fn(&Job) -> usize, alpha: bool| sorted_values(count_by(&all, dict, key), dict, alpha);
-    let cities: Vec<String> = {
-        let prov_id = p.prov.as_deref().and_then(|c| ds.provinces.find(c));
-        let pool: Vec<&Job> = match prov_id {
-            Some(pi) => ds.jobs.iter().filter(|j| j.province as usize == pi).collect(),
-            None => all.clone(),
-        };
-        let mut c: Vec<String> = count_by(&pool, &ds.cities, |j| j.city as usize)
-            .into_iter()
-            .take(if prov_id.is_some() { usize::MAX } else { 300 })
-            .map(|(i, _)| ds.cities.get(i).to_string())
-            .filter(|c| c != "Not given")
-            .collect();
-        if let Some(cur) = &p.city {
-            if !c.contains(cur) && cur != "Not given" {
-                c.push(cur.clone());
-            }
-        }
-        c.sort();
-        c.push("Not given".into());
-        c
-    };
     let active_filters = [&p.q, &p.cat, &p.prov, &p.city, &p.occ, &p.wage, &p.month, &p.level, &p.hours, &p.term, &p.src].iter().filter(|f| f.is_some()).count();
-    let provinces: Vec<(String, String)> = REGIONS.iter().map(|r| (r.code.to_string(), r.name.to_string())).collect();
     let clear_link = Params { view: p.view.clone(), map: p.map.clone(), ..Default::default() }.link(|_| {});
 
     html! {
@@ -742,16 +775,7 @@ fn charts_view(ds: &Dataset, p: &Params) -> Markup {
                     label.form-label.small.fw-semibold for="f-q" { "Search" }
                     input #f-q.form-control type="search" name="q" placeholder="Job title or occupation" value=(p.q.as_deref().unwrap_or("")) class=[p.q.is_some().then_some("border-primary")];
                 }
-                (dropdown("cat", "Category", "All categories", &same(opts(&ds.categories, |j| j.category as usize, true)), &p.cat))
-                (dropdown("prov", "Province or territory", "All of Canada", &provinces, &p.prov))
-                (dropdown("city", if p.prov.is_some() { "City" } else { "City (busiest 300)" }, "Any city", &same(cities), &p.city))
-                (dropdown("occ", "Occupation", "Any occupation", &same(opts(&ds.occupations, |j| j.occupation as usize, true)), &p.occ))
-                (dropdown("wage", "Minimum hourly offer", "Any wage", &wage_options(&p.wage), &p.wage))
-                (dropdown("month", "Month posted", "Any month", &months, &p.month))
-                (dropdown("level", "Training needed", "Any training", &same(opts(&ds.levels, |j| j.level as usize, true)), &p.level))
-                (dropdown("hours", "Hours", "Any hours", &same(opts(&ds.hours, |j| j.hours as usize, false)), &p.hours))
-                (dropdown("term", "Term", "Any term", &same(opts(&ds.terms, |j| j.term as usize, false)), &p.term))
-                (dropdown("src", "Advertised on", "Anywhere", &same(opts(&ds.sources, |j| j.source as usize, false)), &p.src))
+                (filter_dropdowns(ds, p))
                 @if let Some(s) = &p.sort { input type="hidden" name="sort" value=(s); }
                 @if let Some(d) = &p.dir { input type="hidden" name="dir" value=(d); }
                 @if let Some(m) = &p.map { input type="hidden" name="map" value=(m); }
@@ -950,11 +974,23 @@ mod tests {
     fn search_keeps_other_filters_and_shows_them_as_chips() {
         let html = page(&sample(), &params("q=nurse&cat=Health&prov=ON")).into_string();
         assert!(html.contains("<strong>1</strong> job matching “nurse”"), "one posting, singular");
-        assert!(html.contains(r#"<input type="hidden" name="cat" value="Health">"#));
-        assert!(html.contains(r#"<input type="hidden" name="prov" value="ON">"#));
-        assert!(!html.contains(r#"type="hidden" name="q""#));
+        // The search form carries the other filters in its advanced dropdowns, once each.
+        assert!(html.contains(r#"<option value="Health" selected>"#));
+        assert!(html.contains(r#"<option value="ON" selected>"#));
+        assert!(!html.contains(r#"type="hidden""#), "no filter is sent twice");
         assert!(html.contains(r#"href="/?q=nurse&amp;prov=ON" title="Remove Health">"#), "removing a chip keeps the rest");
         assert!(html.contains(">Ontario<"), "provinces show by name");
+    }
+
+    #[test]
+    fn advanced_filters_count_what_is_set_and_clear_it() {
+        let plain = page(&sample(), &params("q=cook")).into_string();
+        assert!(plain.contains("Advanced filters</summary>"), "no count when nothing is set");
+        assert!(!plain.contains("Clear filters"));
+        let html = page(&sample(), &params("q=cook&prov=ON&hours=Full+time&sort=wage")).into_string();
+        assert!(html.contains(r#"Advanced filters <span class="badge text-bg-primary">2</span>"#));
+        assert!(html.contains(r#"<a class="btn btn-link" href="/?q=cook">Clear filters</a>"#), "clearing keeps the search");
+        assert!(html.contains(r#"<input type="hidden" name="sort" value="wage">"#), "the sort survives a search");
     }
 
     #[test]

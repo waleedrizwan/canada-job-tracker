@@ -88,6 +88,9 @@ table.heat td.nodata span { font-weight: 400; }
   table.heat tbody th { white-space: normal; min-width: 7.5em; max-width: 8.5em; line-height: 1.2; }
 }
 
+/* The Jobs tab's "Advanced filters" toggle is a <details>; hide Safari's own marker. */
+details.advanced > summary::-webkit-details-marker { display: none; }
+
 /* When a search changes the grid, cards that stay glide to their new place, new ones fade in and
    old ones fade out. CSS view transitions, so the server version needs no JavaScript; static/app.js
    uses the same names. Browsers without them just swap the page. */
