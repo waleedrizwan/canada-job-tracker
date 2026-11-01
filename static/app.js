@@ -25,6 +25,17 @@ ready.catch((e) => {
   failed = true;
   document.documentElement.classList.remove("loading");
   console.error("Couldn't load the dashboard:", e);
+  // Say so if this URL asked for a different view, rather than show the default one as if it were.
+  if (location.search || location.pathname !== "/") {
+    const note = document.createElement("p");
+    note.className = "alert alert-warning";
+    note.setAttribute("role", "alert");
+    const retry = document.createElement("a");
+    retry.href = location.href;
+    retry.textContent = "Try again";
+    note.append("Couldn't load the data for this view, so these figures are for all jobs in Canada. ", retry);
+    document.querySelector("main")?.prepend(note);
+  }
 });
 
 // Copies `bytes` into the module's memory and calls `fn` with them; see src/wasm.rs.
@@ -46,11 +57,19 @@ function query(url) {
   return encoder.encode(url.search.slice(1));
 }
 
-function render(url) {
+const animate = document.startViewTransition && !matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+// Swaps in the new view. Where the browser can, cards glide to their new places, as they do
+// between the server's pages (see the view transitions in styles.css).
+async function render(url) {
   call(wasm.page, query(url));
   const doc = new DOMParser().parseFromString(output(), "text/html");
-  document.title = doc.title;
-  document.body.replaceWith(doc.body);
+  const swap = () => {
+    document.title = doc.title;
+    document.body.replaceWith(doc.body);
+  };
+  if (animate) await document.startViewTransition(swap).updateCallbackDone;
+  else swap();
 }
 
 function download(url) {
@@ -68,7 +87,7 @@ async function show(url) {
   document.documentElement.classList.add("loading");
   try {
     await ready;
-    render(url);
+    await render(url);
   } finally {
     document.documentElement.classList.remove("loading");
   }
@@ -78,7 +97,8 @@ function navigate(url) {
   // Remember where this page was scrolled to, for the back button.
   history.replaceState({ scroll: scrollY }, "");
   history.pushState(null, "", url);
-  show(url);
+  // The pager's links end in #results, so a new page starts at the top of the cards.
+  show(url).then(() => url.hash && document.querySelector(url.hash)?.scrollIntoView());
 }
 
 // Only the dashboard's own URLs; everything else (Job Bank, StatCan) navigates normally.
@@ -107,7 +127,10 @@ document.addEventListener("submit", (e) => {
   const url = ours(form.getAttribute("action") || "/");
   if (!url || url.pathname !== "/") return;
   e.preventDefault();
-  url.search = new URLSearchParams(new FormData(form)).toString();
+  // Leave out blank fields, so shared links stay short: ?cat=Health, not ?cat=Health&prov=&wage=…
+  const params = new URLSearchParams();
+  for (const [k, v] of new FormData(form)) if (v !== "") params.append(k, v);
+  url.search = params.toString();
   navigate(url);
 });
 

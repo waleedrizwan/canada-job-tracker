@@ -14,7 +14,8 @@ pub mod views;
 #[cfg(target_arch = "wasm32")]
 mod wasm;
 
-pub const STYLES: &str = include_str!("../static/styles.css");
+/// Bootstrap 5.3.3 (MIT, static/vendor), then the site's own few rules, served as one stylesheet.
+pub const STYLES: &str = concat!(include_str!("../static/vendor/bootstrap.min.css"), "\n", include_str!("../static/styles.css"));
 
 /// Changes whenever the stylesheet does, so browsers can cache it forever.
 pub fn styles_version() -> &'static str {

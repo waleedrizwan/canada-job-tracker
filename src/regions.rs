@@ -40,3 +40,19 @@ pub fn by_job_bank_name(name: &str) -> Option<&'static Region> {
 pub fn name(code: &str) -> &'static str {
     by_code(code).map_or("Unknown", |r| r.name)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn codes_are_unique_and_look_up_both_ways() {
+        let mut codes: Vec<&str> = REGIONS.iter().map(|r| r.code).collect();
+        codes.sort();
+        codes.dedup();
+        assert_eq!(codes.len(), REGIONS.len());
+        assert_eq!(by_job_bank_name("Québec").map(|r| r.code), Some("QC"));
+        assert_eq!(name("NU"), "Nunavut");
+        assert_eq!(name("XX"), "Unknown");
+    }
+}

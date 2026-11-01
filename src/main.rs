@@ -13,8 +13,9 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use axum::extract::rejection::QueryRejection;
 use axum::extract::{Query, State};
-use axum::http::{HeaderValue, header};
+use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::get;
 use axum::Router;
@@ -117,6 +118,7 @@ async fn main() -> Result<()> {
         .route("/export.csv", get(export))
         .route("/styles.css", get(styles))
         .route("/healthz", get(|| async { "ok" }))
+        .fallback(not_found)
         .layer(CompressionLayer::new())
         .with_state(app);
 
@@ -127,16 +129,22 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn index(State(app): State<App>, Query(p): Query<Params>) -> Response {
-    let p = p.normalize();
+/// The view a query string asks for. A malformed one (say, a parameter given twice) gets the
+/// default view rather than an error, as in the browser build (src/wasm.rs).
+fn params(q: Result<Query<Params>, QueryRejection>) -> Params {
+    q.map(|Query(p)| p).unwrap_or_default().normalize()
+}
+
+async fn index(State(app): State<App>, q: Result<Query<Params>, QueryRejection>) -> Response {
+    let p = params(q);
     let ds = app.current();
     let html = views::page(&ds, &p).into_string();
     ([(header::CACHE_CONTROL, "public, max-age=60")], Html(html)).into_response()
 }
 
-async fn export(State(app): State<App>, Query(p): Query<Params>) -> Response {
+async fn export(State(app): State<App>, q: Result<Query<Params>, QueryRejection>) -> Response {
     let ds = app.current();
-    let body = views::csv(&ds, &p.normalize());
+    let body = views::csv(&ds, &params(q));
     let name = format!("attachment; filename=\"{}\"", views::csv_filename(&ds));
     (
         [
@@ -146,6 +154,10 @@ async fn export(State(app): State<App>, Query(p): Query<Params>) -> Response {
         body,
     )
         .into_response()
+}
+
+async fn not_found() -> Response {
+    (StatusCode::NOT_FOUND, Html(views::not_found().into_string())).into_response()
 }
 
 async fn styles() -> Response {

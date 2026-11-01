@@ -6,3 +6,5 @@ node_modules/
 target/
 .wrangler/
 dist/
+test-results/
+playwright-report/

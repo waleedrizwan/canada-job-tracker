@@ -8,5 +8,8 @@
 		"directory": "./dist",
 		// Every page URL gets index.html, and app.js draws the view the URL asks for.
 		"not_found_handling": "single-page-application"
-	}
+	},
+	// Cloudflare builds other branches (pull requests) with `wrangler preview`, which needs this
+	// block to make a preview link. It can be empty: the settings above apply to previews too.
+	"previews": {}
 }
