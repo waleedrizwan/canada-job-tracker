@@ -7,6 +7,9 @@ use crate::data::{Dataset, Dict, Job};
 /// Every piece of page state lives in the query string, so any view can be bookmarked or shared.
 #[derive(Deserialize, Serialize, Clone, Default)]
 pub struct Params {
+    /// Which tab: the job cards (default), "heatmap" or "charts".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub view: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub q: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -44,12 +47,15 @@ impl Params {
     /// Treats blank form fields as unset.
     pub fn normalize(mut self) -> Self {
         for f in [
-            &mut self.q, &mut self.cat, &mut self.occ, &mut self.prov, &mut self.city, &mut self.map, &mut self.level, &mut self.hours, &mut self.term,
+            &mut self.view, &mut self.q, &mut self.cat, &mut self.occ, &mut self.prov, &mut self.city, &mut self.map, &mut self.level, &mut self.hours, &mut self.term,
             &mut self.wage, &mut self.month, &mut self.src, &mut self.sort, &mut self.dir, &mut self.page,
         ] {
             if f.as_deref().is_some_and(|v| v.trim().is_empty()) {
                 *f = None;
             }
+        }
+        if !matches!(self.view.as_deref(), Some("heatmap" | "charts")) {
+            self.view = None;
         }
         if self.wage.as_deref().and_then(|w| w.parse::<f32>().ok()).is_none_or(|w| w <= 0.0) {
             self.wage = None;
@@ -197,6 +203,8 @@ mod tests {
         assert!(params("wage=0").wage.is_none());
         assert!(params("wage=-5").wage.is_none());
         assert_eq!(params("wage=17.5").wage.as_deref(), Some("17.5"));
+        assert_eq!(params("view=heatmap").view.as_deref(), Some("heatmap"));
+        assert!(params("view=nope").view.is_none(), "an unknown tab shows the jobs");
     }
 
     #[test]
