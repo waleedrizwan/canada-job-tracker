@@ -203,7 +203,8 @@ pub fn page(ds: &Dataset, p: &Params) -> Markup {
                             h3.h6.text-body { "What to keep in mind" }
                             p.mb-0 {
                                 "Job Bank is one slice of the market. Employers hiring through the Temporary Foreign Worker program must advertise there, so food service, caregiving, farm work and trades show up more, and office and tech jobs less. "
-                                "Employer names and closing dates aren't published. Wages are converted to hourly at 40 hours a week unless the posting says otherwise. "
+                                (format!("Employer names and closing dates aren't published, so the jobs list shows postings from the last {} days of data, the ones most likely to still be open. ", query::RECENT_DAYS))
+                                "Wages are converted to hourly at 40 hours a week unless the posting says otherwise. "
                                 "Some Quebec postings have French titles. Toronto includes North York, Etobicoke, Scarborough, York and East York."
                             }
                         }
@@ -304,8 +305,10 @@ fn card(ds: &Dataset, j: &Job) -> Markup {
 
 /// The default tab: a title search and a grid of postings, newest first.
 fn jobs_view(ds: &Dataset, p: &Params) -> Markup {
-    let mut rows = query::filter(ds, p);
+    let (mut rows, older) = query::listed(ds, p);
     let n = rows.len();
+    let since = query::recent_since(ds);
+    let since = format!("{} {}", &MONTHS[since.month0() as usize][..3], since.day());
     query::sort(ds, &mut rows, p.sort_key(), p.descending());
     let pages = n.div_ceil(PAGE_SIZE).max(1);
     let cur = p.page().min(pages);
@@ -342,6 +345,7 @@ fn jobs_view(ds: &Dataset, p: &Params) -> Markup {
             @if let Some(s) = &p.sort { input type="hidden" name="sort" value=(s); }
             @if let Some(d) = &p.dir { input type="hidden" name="dir" value=(d); }
             @if let Some(m) = &p.map { input type="hidden" name="map" value=(m); }
+            @if let Some(o) = &p.older { input type="hidden" name="older" value=(o); }
         }
         @if !chips.is_empty() {
             div.chips.d-flex.flex-wrap.gap-2.mb-3 aria-label="Filters" {
@@ -355,13 +359,23 @@ fn jobs_view(ds: &Dataset, p: &Params) -> Markup {
                 p.count.mb-0 aria-live="polite" {
                     strong { (thousands(n as u64)) } (if n == 1 { " job" } else { " jobs" })
                     @if let Some(q) = &p.q { " matching “" (q) "”" }
+                    @if p.recent_only() { " posted since " (since) }
                     @if n > PAGE_SIZE { span.text-body-secondary { " · newest first" } }
+                    @if older > 0 {
+                        " · " a.older href=(p.link(|q| q.older = Some("1".into()))) { "Include " (thousands(older as u64)) " older" }
+                    } @else if p.older.is_some() && p.month.is_none() {
+                        " · " a.older href=(p.link(|q| q.older = None)) { "Only since " (since) }
+                    }
                 }
                 @if n > 0 { a.download.small href=(export_link) download { "Download " (thousands(n as u64)) " as CSV" } }
             }
             @if n == 0 {
                 div.alert.alert-light.border {
-                    p.mb-1 { "No jobs match. Try a shorter or different job title." }
+                    p.mb-1 {
+                        "No jobs match. Try a shorter or different job title"
+                        @if older > 0 { ", or " a.alert-link href=(p.link(|q| q.older = Some("1".into()))) { "include older postings" } }
+                        "."
+                    }
                     a.alert-link href="/" { "Show all jobs" }
                 }
             } @else {
@@ -869,7 +883,7 @@ pub fn csv_filename(ds: &Dataset) -> String {
 
 /// The filtered postings as CSV, in table order.
 pub fn csv(ds: &Dataset, p: &Params) -> String {
-    let mut rows = query::filter(ds, p);
+    let (mut rows, _) = query::listed(ds, p);
     query::sort(ds, &mut rows, p.sort_key(), p.descending());
     let cell = |s: &str| if s.contains([',', '"', '\n', '\r']) { format!("\"{}\"", s.replace('"', "\"\"")) } else { s.to_string() };
     let opt = |v: Option<f32>| v.map(|v| v.to_string()).unwrap_or_default();
@@ -938,7 +952,7 @@ mod tests {
     #[test]
     fn csv_has_header_province_and_quoting() {
         let ds = sample();
-        let out = csv(&ds, &params("sort=posted&dir=desc"));
+        let out = csv(&ds, &params("sort=posted&dir=desc&older=1"));
         let lines: Vec<&str> = out.lines().collect();
         assert_eq!(lines[0], "id,title,occupation,category,skill_level,city,province,hours,term,wage_min_hourly,wage_max_hourly,openings,posted,source");
         assert_eq!(lines.len(), 6);
@@ -948,6 +962,7 @@ mod tests {
         assert!(nights.contains(r#""Line Cook, Nights""#), "{nights}");
         assert!(nights.contains("Not given,BC,"), "{nights}");
         assert_eq!(csv(&ds, &params("prov=XX")).lines().count(), 1, "just the header when nothing matches");
+        assert_eq!(csv(&ds, &params("")).lines().count(), 4, "like the jobs tab, only recent postings by default");
     }
 
     #[test]
@@ -961,25 +976,39 @@ mod tests {
         let html = page(&ds, &params("")).into_string();
         assert!(html.contains("<title>Canada Job Tracker</title>"));
         assert!(html.contains(r#"<a class="nav-link active" href="/" aria-current="page">Jobs</a>"#), "the jobs tab is current");
-        assert!(html.contains("<strong>5</strong> jobs"), "posting count");
-        assert_eq!(html.matches(r#"<article class="job card"#).count(), 5);
+        assert!(html.contains("<strong>3</strong> jobs posted since Aug 17"), "posting count, last 45 days only");
+        assert!(html.contains(r#"<a class="older" href="/?older=1">Include 2 older</a>"#));
+        assert_eq!(html.matches(r#"<article class="job card"#).count(), 3);
         assert!(html.contains("view-transition-name: job-1"), "each card can be animated on its own");
-        assert!(html.contains(r#"<span class="card-loc text-truncate me-2">British Columbia</span>"#), "a posting with no city shows its province");
         assert!(html.contains(r#"$17–$19<small class="fw-normal text-body-secondary"> an hour</small>"#));
-        assert!(html.contains("Download 5 as CSV"));
+        assert!(html.contains("Download 3 as CSV"));
         assert!(!html.contains("Page 1 of"), "no pager when everything fits");
     }
 
     #[test]
+    fn jobs_tab_can_include_older_postings() {
+        let ds = sample();
+        let html = page(&ds, &params("older=1")).into_string();
+        assert!(html.contains("<strong>5</strong> jobs ·"), "no date limit");
+        assert!(html.contains(r#"<a class="older" href="/">Only since Aug 17</a>"#));
+        assert!(html.contains(r#"<span class="card-loc text-truncate me-2">British Columbia</span>"#), "a posting with no city shows its province");
+        assert!(html.contains(r#"<input type="hidden" name="older" value="1">"#), "searching keeps older postings");
+        let html = page(&ds, &params("month=2026-07")).into_string();
+        assert!(html.contains("<strong>1</strong> job</p>") && !html.contains("since Aug 17"), "a chosen month isn't cut short");
+        let html = page(&ds, &params("q=nurse&prov=ON")).into_string();
+        assert!(html.contains(r#"or <a class="alert-link" href="/?q=nurse&amp;prov=ON&amp;older=1">include older postings</a>."#));
+    }
+
+    #[test]
     fn search_keeps_other_filters_and_shows_them_as_chips() {
-        let html = page(&sample(), &params("q=nurse&cat=Health&prov=ON")).into_string();
+        let html = page(&sample(), &params("q=nurse&cat=Health&prov=BC")).into_string();
         assert!(html.contains("<strong>1</strong> job matching “nurse”"), "one posting, singular");
         // The search form carries the other filters in its advanced dropdowns, once each.
         assert!(html.contains(r#"<option value="Health" selected>"#));
-        assert!(html.contains(r#"<option value="ON" selected>"#));
+        assert!(html.contains(r#"<option value="BC" selected>"#));
         assert!(!html.contains(r#"type="hidden""#), "no filter is sent twice");
-        assert!(html.contains(r#"href="/?q=nurse&amp;prov=ON" title="Remove Health">"#), "removing a chip keeps the rest");
-        assert!(html.contains(">Ontario<"), "provinces show by name");
+        assert!(html.contains(r#"href="/?q=nurse&amp;prov=BC" title="Remove Health">"#), "removing a chip keeps the rest");
+        assert!(html.contains(">British Columbia<"), "provinces show by name");
     }
 
     #[test]
@@ -1056,7 +1085,7 @@ mod tests {
         assert_eq!(page_link(&p, 2), "/?q=cook&page=2#results");
         assert_eq!(page_link(&p, 1), "/?q=cook#results", "page 1 has no page number");
         let html = page(&sample(), &params("page=9")).into_string();
-        assert_eq!(html.matches(r#"<article class="job card"#).count(), 5, "an out-of-range page shows the last");
+        assert_eq!(html.matches(r#"<article class="job card"#).count(), 3, "an out-of-range page shows the last");
         assert!(!html.contains("rel=\"next\"") && !html.contains("rel=\"prev\""));
     }
 }
