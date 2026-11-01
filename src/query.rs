@@ -122,11 +122,23 @@ pub fn parse_month(m: &str) -> Option<(i32, u32)> {
     Some((y.parse().ok()?, mo.parse().ok()?))
 }
 
+/// Whether `q` appears in `text` as whole words, allowing a plural ending: "nurse" matches
+/// "Registered Nurse" and "Nurses" but not "Nursery". Both are lowercase.
+fn has_words(text: &str, q: &str) -> bool {
+    let word = |c: Option<char>| c.is_some_and(char::is_alphanumeric);
+    text.match_indices(q).any(|(i, _)| {
+        let rest = &text[i + q.len()..];
+        let rest = rest.strip_prefix("es").or_else(|| rest.strip_prefix('s')).filter(|r| !word(r.chars().next())).unwrap_or(rest);
+        !word(text[..i].chars().next_back()) && !word(rest.chars().next())
+    })
+}
+
 /// Postings matching every filter.
 pub fn filter<'a>(ds: &'a Dataset, p: &Params) -> Vec<&'a Job> {
-    // The search matches job titles only (an occupation like "Nursery and greenhouse labourers"
-    // would otherwise turn up for "nurse"). Each distinct title is checked once, not once per posting.
-    let title_hit: Option<Vec<bool>> = p.q.as_deref().map(str::to_lowercase).map(|q| ds.titles.lower.iter().map(|t| t.contains(q.as_str())).collect());
+    // The search matches whole words in job titles only, so "nurse" doesn't bring up nursery or
+    // greenhouse work. Each distinct title is checked once, not once per posting.
+    let title_hit: Option<Vec<bool>> =
+        p.q.as_deref().map(|q| q.trim().to_lowercase()).map(|q| ds.titles.lower.iter().map(|t| has_words(t, &q)).collect());
 
     let (cat, occ, prov, city, level, hours, term, src) = (
         sel(&ds.categories, &p.cat), sel(&ds.occupations, &p.occ), sel(&ds.provinces, &p.prov), sel(&ds.cities, &p.city), sel(&ds.levels, &p.level),
@@ -270,6 +282,22 @@ mod tests {
         assert_eq!(ids(&filter(&ds, &params("q=cook"))), [1, 4], "titles \"Cook\" and \"Line Cook, Nights\"");
         assert!(filter(&ds, &params("q=electricians")).is_empty(), "the occupation \"Electricians\" doesn't count");
         assert!(filter(&ds, &params("q=astronaut")).is_empty());
+    }
+
+    #[test]
+    fn search_matches_whole_words_and_plurals() {
+        assert!(has_words("registered nurse", "nurse"));
+        assert!(has_words("nurses aide", "nurse"), "a plural counts");
+        assert!(has_words("cashier, boxes", "box"));
+        assert!(!has_words("nursery worker", "nurse"), "part of a longer word doesn't");
+        assert!(!has_words("line cook", "ook"));
+        assert!(has_words("line cook, nights", "line cook"), "a phrase");
+        assert!(has_words("infirmière auxiliaire", "infirmière"), "accented words");
+        assert!(!has_words("infirmières", "infirmi"), "accented letters are part of the word");
+        assert!(has_words("cook (temporary)", "cook"));
+        let ds = sample();
+        assert_eq!(ids(&filter(&ds, &params("q=+Cook+"))), [1, 4], "surrounding spaces are ignored");
+        assert!(filter(&ds, &params("q=electric")).is_empty());
     }
 
     #[test]
