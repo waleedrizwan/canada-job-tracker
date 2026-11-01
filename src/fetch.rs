@@ -131,6 +131,59 @@ fn title_case(s: &str) -> String {
     out
 }
 
+/// Words that mark a job title as French: function words and common French job names.
+const FRENCH: &[&str] = &[
+    "de", "du", "des", "et", "aux", "au", "la", "le", "les", "en", "pour", "sur", "chez", "avec", "ou", "commis", "préposé", "préposée",
+    "manoeuvre", "manœuvre", "journalier", "journalière", "cuisinier", "cuisinière", "technicien", "technicienne", "adjoint", "adjointe",
+    "directeur", "directrice", "chauffeuse", "ouvrier", "ouvrière", "gérant", "gérante", "gerant", "vendeur", "vendeuse",
+    "conseiller", "conseillère", "représentant", "représentante", "representant", "superviseur", "superviseure", "secrétaire",
+    "infirmier", "infirmière", "enseignant", "enseignante", "éducateur", "éducatrice", "mécanicien", "mecanicien", "soudeur", "magasinier",
+    "caissier", "caissière", "serveur", "serveuse", "plongeur", "boulanger", "boucher", "couvreur", "menuisier", "électricien",
+    "plombier", "opérateur", "opératrice", "operateur", "coordonnateur", "coordonnatrice", "chargé", "chargée", "livreur", "nettoyeur",
+    "entretien", "ménager", "ménagère", "agente", "conducteur", "conductrice", "emballeur", "préparateur", "préparatrice", "inspecteur",
+    "stagiaire", "ingénieur", "ingénieure", "comptable", "réceptionniste", "animateur", "animatrice", "gestionnaire", "contremaître",
+    "soir", "nuit", "jour", "temps", "plein", "partiel", "travailleur", "travailleuse", "employé", "employée", "intervenant",
+    "intervenante", "manutentionnaire", "analyste", "assembleur", "monteur", "agents", "responsable", "peintre", "classe", "cariste",
+];
+/// Words that mark a title as English, to outweigh a stray French word or accented name
+/// ("Retail Sales Associate, Galeries d'Anjou", "Field Sales Manager (Bilingual EN FR)").
+const ENGLISH: &[&str] = &[
+    "and", "of", "the", "for", "with", "to", "in", "at", "or", "per", "week", "manager", "worker", "driver", "cook", "server", "cleaner",
+    "labourer", "laborer", "clerk", "associate", "representative", "specialist", "engineer", "developer", "technician", "nurse",
+    "teacher", "supervisor", "coordinator", "officer", "operator", "mechanic", "electrician", "plumber", "carpenter", "cashier", "sales",
+    "customer", "support", "lead", "part", "time", "school", "kitchen", "helper", "attendant", "analyst", "administrator", "advisor",
+    "adviser", "consultant", "educator", "warehouse", "general", "retail", "store", "truck", "farm", "program", "project", "business",
+    "team", "care", "home", "health", "early", "childhood", "staff", "office", "accountant", "receptionist", "executive", "director",
+    "crew", "member", "food", "elementary", "learning", "engagement",
+];
+/// English words spelled with accents or ending like French job names.
+const LOANWORDS: &[&str] = &[
+    "café", "cafés", "résumé", "entrée", "protégé", "sauté", "décor", "crème", "purée", "attaché", "entrepreneur", "intrapreneur", "intrepreneur",
+    "restaurateur", "amateur", "connoisseur", "liqueur", "masseur", "rotisseur", "saboteur", "chauffeur", "alien", "lien",
+];
+/// Endings of French job names ("dessinateur", "coiffeuse", "physicienne").
+const FRENCH_ENDINGS: &[&str] = &["eur", "euse", "trice", "ière", "ien", "ienne"];
+
+/// Whether a job title reads as French: more French words (accented words and elisions like
+/// "d'" count) than English. Words both languages use ("senior", "service") count for neither.
+fn looks_french(title: &str) -> bool {
+    let lower = title.to_lowercase();
+    let mut fr = ["d'", "l'", "d’", "l’"].iter().map(|e| lower.matches(e).count()).sum::<usize>();
+    let mut en = 0;
+    for word in title.split(|c: char| !c.is_alphabetic()).filter(|w| !w.is_empty()) {
+        let lower = word.to_lowercase();
+        let w = lower.as_str();
+        if ENGLISH.contains(&w) {
+            en += 1;
+        } else if (FRENCH.contains(&w) && word != "EN")
+            || (!LOANWORDS.contains(&w) && (w.contains(|c| "éèêëàâîïôûùçœ".contains(c)) || FRENCH_ENDINGS.iter().any(|e| w.ends_with(e))))
+        {
+            fr += 1;
+        }
+    }
+    fr > en
+}
+
 /// Converts a posted pay figure to hourly, using the posting's weekly hours when given.
 fn hourly(per: Option<&str>, value: Option<&str>, hours_per: Option<&str>, hours_max: Option<&str>) -> Option<f32> {
     let v: f64 = value?.parse().ok().filter(|v: &f64| *v > 0.0)?;
@@ -186,9 +239,10 @@ fn parse_line(cols: &Columns, line: &str, d: &mut Dicts) -> Option<RawRow> {
         None => "Unspecified",
     };
     let term = g("Employment Term").unwrap_or("Unspecified");
-    let title = match g("Original Job Title") {
-        Some(t) => d.id("title", t),
-        None => d.id("title", &title_case(g("Job Title").unwrap_or("Untitled"))),
+    // The employer's own title, unless it's in French: then Job Bank's English title for the job.
+    let title = match (g("Original Job Title"), g("Job Title")) {
+        (Some(t), en) if en.is_none() || !looks_french(t) => d.id("title", t),
+        (_, en) => d.id("title", &title_case(en.unwrap_or("Untitled"))),
     };
 
     Some((
@@ -438,6 +492,20 @@ mod tests {
         assert_eq!(quarter("2026-04-01"), "Q2 2026");
         assert_eq!(quarter("2025-12-01"), "Q4 2025");
         assert_eq!(quarter(""), "Q1 ?");
+    }
+
+    #[test]
+    fn spots_french_titles() {
+        for t in ["Préposé(e) aux bénéficiaires - quart de jour soir", "cuisinier cuisinière", "AGENT DE BUREAU", "Journalier de production",
+                  "Technicien comptable", "Man?uvre agricole en production laitière", "Gérant",
+                  "Développeur Full Stack Senior", "Préposé (e) service client", "estimateur, Joliette", "coiffeur coiffeuse"] {
+            assert!(looks_french(t), "{t}");
+        }
+        for t in ["Line Cook", "Retail Sales Associate, Galeries d'Anjou", "Field Sales Manager (Bilingual EN FR)", "R&D Mechanical Engineer I",
+                  "Café Supervisor", "Retail Sales Associate, Châteauguay", "Private Chauffeur", "Restaurateur - Food Services",
+                  "Representative - Customer Service - 545 EN"] {
+            assert!(!looks_french(t), "{t}");
+        }
     }
 
     const HEADER: [&str; 15] = [
