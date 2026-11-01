@@ -124,10 +124,9 @@ pub fn parse_month(m: &str) -> Option<(i32, u32)> {
 
 /// Postings matching every filter.
 pub fn filter<'a>(ds: &'a Dataset, p: &Params) -> Vec<&'a Job> {
-    // Match the search against each distinct title/occupation once, not once per posting.
-    let q = p.q.as_deref().map(str::to_lowercase);
-    let hit = |d: &Dict| -> Option<Vec<bool>> { q.as_ref().map(|q| d.lower.iter().map(|v| v.contains(q.as_str())).collect()) };
-    let (title_hit, occ_hit) = (hit(&ds.titles), hit(&ds.occupations));
+    // The search matches job titles only (an occupation like "Nursery and greenhouse labourers"
+    // would otherwise turn up for "nurse"). Each distinct title is checked once, not once per posting.
+    let title_hit: Option<Vec<bool>> = p.q.as_deref().map(str::to_lowercase).map(|q| ds.titles.lower.iter().map(|t| t.contains(q.as_str())).collect());
 
     let (cat, occ, prov, city, level, hours, term, src) = (
         sel(&ds.categories, &p.cat), sel(&ds.occupations, &p.occ), sel(&ds.provinces, &p.prov), sel(&ds.cities, &p.city), sel(&ds.levels, &p.level),
@@ -139,10 +138,8 @@ pub fn filter<'a>(ds: &'a Dataset, p: &Params) -> Vec<&'a Job> {
     ds.jobs
         .iter()
         .filter(|j| {
-            if let (Some(t), Some(o)) = (&title_hit, &occ_hit) {
-                if !t[j.title as usize] && !o[j.occupation as usize] {
-                    return false;
-                }
+            if title_hit.as_ref().is_some_and(|t| !t[j.title as usize]) {
+                return false;
             }
             cat.ok(j.category as usize)
                 && occ.ok(j.occupation as usize)
@@ -267,10 +264,11 @@ mod tests {
     }
 
     #[test]
-    fn search_matches_title_or_occupation_case_insensitively() {
+    fn search_matches_titles_only_case_insensitively() {
         let ds = sample();
         assert_eq!(ids(&filter(&ds, &params("q=NURSE"))), [2, 5]);
-        assert_eq!(ids(&filter(&ds, &params("q=cook"))), [1, 4], "title \"Cook\" and occupation \"Cooks\"");
+        assert_eq!(ids(&filter(&ds, &params("q=cook"))), [1, 4], "titles \"Cook\" and \"Line Cook, Nights\"");
+        assert!(filter(&ds, &params("q=electricians")).is_empty(), "the occupation \"Electricians\" doesn't count");
         assert!(filter(&ds, &params("q=astronaut")).is_empty());
     }
 

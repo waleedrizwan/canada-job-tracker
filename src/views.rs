@@ -773,7 +773,7 @@ fn charts_view(ds: &Dataset, p: &Params) -> Markup {
             div.row.g-3.align-items-end {
                 div.filter.col-12.col-lg-6 {
                     label.form-label.small.fw-semibold for="f-q" { "Search" }
-                    input #f-q.form-control type="search" name="q" placeholder="Job title or occupation" value=(p.q.as_deref().unwrap_or("")) class=[p.q.is_some().then_some("border-primary")];
+                    input #f-q.form-control type="search" name="q" placeholder="Job title" value=(p.q.as_deref().unwrap_or("")) class=[p.q.is_some().then_some("border-primary")];
                 }
                 (filter_dropdowns(ds, p))
                 @if let Some(s) = &p.sort { input type="hidden" name="sort" value=(s); }
