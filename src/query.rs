@@ -1,8 +1,13 @@
 //! URL query parameters and the filtering they drive.
 
+use chrono::{Duration, NaiveDate};
 use serde::{Deserialize, Serialize};
 
 use crate::data::{Dataset, Dict, Job};
+
+/// Job Bank doesn't publish closing dates, so the jobs tab lists postings from this many days
+/// before the newest one, the ones most likely to still be open.
+pub const RECENT_DAYS: i64 = 45;
 
 /// Every piece of page state lives in the query string, so any view can be bookmarked or shared.
 #[derive(Deserialize, Serialize, Clone, Default)]
@@ -32,6 +37,9 @@ pub struct Params {
     pub month: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub src: Option<String>,
+    /// "1" lists older postings on the jobs tab too.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub older: Option<String>,
     /// What the map is shaded by: postings per capita (default) or "wage".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub map: Option<String>,
@@ -48,7 +56,7 @@ impl Params {
     pub fn normalize(mut self) -> Self {
         for f in [
             &mut self.view, &mut self.q, &mut self.cat, &mut self.occ, &mut self.prov, &mut self.city, &mut self.map, &mut self.level, &mut self.hours, &mut self.term,
-            &mut self.wage, &mut self.month, &mut self.src, &mut self.sort, &mut self.dir, &mut self.page,
+            &mut self.wage, &mut self.month, &mut self.src, &mut self.older, &mut self.sort, &mut self.dir, &mut self.page,
         ] {
             if f.as_deref().is_some_and(|v| v.trim().is_empty()) {
                 *f = None;
@@ -56,6 +64,9 @@ impl Params {
         }
         if !matches!(self.view.as_deref(), Some("heatmap" | "charts")) {
             self.view = None;
+        }
+        if self.older.as_deref() != Some("1") {
+            self.older = None;
         }
         if self.wage.as_deref().and_then(|w| w.parse::<f32>().ok()).is_none_or(|w| w <= 0.0) {
             self.wage = None;
@@ -72,6 +83,12 @@ impl Params {
             Ok(qs) if !qs.is_empty() => format!("/?{qs}"),
             _ => "/".into(),
         }
+    }
+
+    /// Whether the jobs tab leaves out postings older than `RECENT_DAYS`: unless asked to keep
+    /// them, or a month is chosen, which would otherwise come up empty.
+    pub fn recent_only(&self) -> bool {
+        self.older.is_none() && self.month.is_none()
     }
 
     pub fn page(&self) -> usize {
@@ -165,6 +182,24 @@ pub fn filter<'a>(ds: &'a Dataset, p: &Params) -> Vec<&'a Job> {
                 && month.is_none_or(|m| j.month() == m)
         })
         .collect()
+}
+
+/// The first posting date the jobs tab lists by default.
+pub fn recent_since(ds: &Dataset) -> NaiveDate {
+    ds.as_of - Duration::days(RECENT_DAYS - 1)
+}
+
+/// Postings for the jobs tab and its download: `filter`, less older postings unless the
+/// params keep them. Also returns how many older ones were left out.
+pub fn listed<'a>(ds: &'a Dataset, p: &Params) -> (Vec<&'a Job>, usize) {
+    let mut rows = filter(ds, p);
+    let before = rows.len();
+    if p.recent_only() {
+        let since = recent_since(ds);
+        rows.retain(|j| j.posted >= since);
+    }
+    let left_out = before - rows.len();
+    (rows, left_out)
 }
 
 /// Sorts for the table. Missing wages always sort last.
@@ -265,6 +300,19 @@ mod tests {
         assert_eq!(ids(&filter(&ds, &params("src=Partner+job+boards"))), [2, 4]);
         assert_eq!(ids(&filter(&ds, &params("month=2026-08"))), [3, 4]);
         assert_eq!(ids(&filter(&ds, &params("prov=ON&cat=Health"))), [5]);
+    }
+
+    #[test]
+    fn jobs_tab_lists_the_last_45_days_unless_asked() {
+        let ds = sample();
+        // Newest posting Sep 30, so the cutoff is Aug 17: Aug 20 is in, Aug 3 is out.
+        assert_eq!(recent_since(&ds).to_string(), "2026-08-17");
+        let (rows, left_out) = listed(&ds, &params(""));
+        assert_eq!((ids(&rows), left_out), (vec![1, 2, 3], 2));
+        assert_eq!(listed(&ds, &params("older=1")).0.len(), 5);
+        assert_eq!(ids(&listed(&ds, &params("month=2026-07")).0), [5], "a chosen month shows all of it");
+        assert_eq!(listed(&ds, &params("prov=BC")).1, 1);
+        assert!(params("older=yes").older.is_none());
     }
 
     #[test]
