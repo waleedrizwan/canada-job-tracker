@@ -185,13 +185,22 @@ fn looks_french(title: &str) -> bool {
 }
 
 /// Converts a posted pay figure to hourly, using the posting's weekly hours when given.
+///
+/// The unit label is often wrong: postings say "Hour" for an annual salary (60000 for an executive
+/// assistant), "Year" for an hourly rate, or leave it "NA". No hourly rate is 1,000 or more, and a
+/// figure under 1,000 is rarely a yearly salary, so the size of the figure decides those cases.
 fn hourly(per: Option<&str>, value: Option<&str>, hours_per: Option<&str>, hours_max: Option<&str>) -> Option<f32> {
     let v: f64 = value?.parse().ok().filter(|v: &f64| *v > 0.0)?;
     let weekly = match (hours_per, hours_max.and_then(|h| h.parse::<f64>().ok())) {
         (Some("Week"), Some(h)) if h > 0.0 => h,
         _ => 40.0,
     };
-    let h = match per? {
+    let per = match per? {
+        "Hour" | "NA" if v >= 1000.0 => "Year",
+        "Year" | "NA" if v < 1000.0 => "Hour",
+        other => other,
+    };
+    let h = match per {
         "Hour" => v,
         "Day" => v / 8.0,
         "Week" => v / weekly,
@@ -459,6 +468,16 @@ mod tests {
         assert_eq!(hourly(Some("Week"), Some("1000"), Some("Week"), Some("20")), Some(50.0), "the posting's own hours");
         assert_eq!(hourly(Some("Bi-weekly"), Some("2000"), None, None), Some(25.0));
         assert_eq!(hourly(Some("Month"), Some("4000"), None, None), Some(23.08));
+    }
+
+    #[test]
+    fn size_corrects_a_wrong_unit_label() {
+        assert_eq!(hourly(Some("Hour"), Some("60000"), None, None), Some(28.85), "an annual salary labelled hourly");
+        assert_eq!(hourly(Some("Year"), Some("23"), None, None), Some(23.0), "an hourly rate labelled yearly");
+        assert_eq!(hourly(Some("NA"), Some("120"), None, None), Some(120.0));
+        assert_eq!(hourly(Some("NA"), Some("60000"), None, None), Some(28.85));
+        assert_eq!(hourly(Some("Hour"), Some("500"), None, None), None, "too big to be hourly, too small to be yearly");
+        assert_eq!(hourly(Some("Hour"), Some("7000000"), None, None), None, "a figure that can't be any pay");
     }
 
     #[test]
