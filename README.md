@@ -7,7 +7,7 @@ A dashboard for exploring job postings across Canada: filter by province, city, 
 Written in Rust. The same Rust code renders every page, including the SVG charts, in one of two places:
 
 - **On a server** (`cargo run`). The browser gets plain HTML and CSS with **no JavaScript**.
-- **In the browser**, compiled to WebAssembly. This is how the live site works: it's a static site, so it costs nothing to host (see [Deploying](#deploying)).
+- **As a static page**, the treemap in `static/index.html`, drawn in the browser from `data.json`. This is how the live site works: it's static files, so it costs nothing to host (see [Deploying](#deploying)). It has the layout of [karpathy/jobs](https://github.com/karpathy/jobs) and doesn't have the server's job list, map or charts.
 
 All page state lives in the URL, so any view can be bookmarked or shared. Bars in the charts are links that apply a filter, and hovering a bar shows its numbers.
 
@@ -35,7 +35,7 @@ Then open http://localhost:8080.
 
 ```bash
 npm install
-npm run build   # compiles the WebAssembly renderer and builds dist/
+npm run build   # builds dist/: the page and data.json
 npm run dev     # serves dist/ with wrangler on port 8787
 ```
 
@@ -116,7 +116,7 @@ Job Bank CSVs + StatCan API ──fetch.rs──▶ data/jobs.json ──data.rs
                                                        views.rs + charts.rs ──▶ HTML / CSV
 ```
 
-- **One renderer, two hosts.** `src/views.rs` turns a `Dataset` and the URL's parameters into a complete HTML page (Maud templates), and `src/charts.rs` draws the charts as HTML and inline SVG. The Axum server (`src/main.rs`) calls it for each request. The static site compiles the same library to WebAssembly (`src/wasm.rs`), and `static/app.js` calls it in the browser whenever a link is clicked or the form is sent, then swaps in the new page body.
+- **Two outputs from one dataset.** `src/views.rs` turns a `Dataset` and the URL's parameters into a complete HTML page (Maud templates), and `src/charts.rs` draws the charts as HTML and inline SVG. The Axum server (`src/main.rs`) calls it for each request. The static site (`src/site.rs`) instead aggregates the last 45 days of postings into one tile per occupation, in `data.json`, and `static/index.html` draws them as a treemap in the browser.
 - **The URL is the state.** Every filter, sort, page and map setting is a query parameter (`query::Params`), so the server and the browser build produce the same page for the same URL. Malformed or unknown values fall back to defaults or to "no matches" rather than errors.
 - **Compact data.** `data/jobs.json` stores each text column once as a list of distinct values, with postings as rows of indexes. In memory, each posting is a ~40-byte struct, and searches compare each distinct title once rather than once per posting.
 - **No database.** All of the data fits in memory, so filtering is a scan over ~158,000 postings, which takes a few milliseconds.
@@ -126,9 +126,8 @@ Job Bank CSVs + StatCan API ──fetch.rs──▶ data/jobs.json ──data.rs
 | File | |
 |---|---|
 | `src/main.rs` | HTTP server (Axum), routes, background refresh, and the `fetch`, `update` and `site` commands |
-| `src/lib.rs` | The code shared by the server and the WebAssembly build |
-| `src/wasm.rs` | WebAssembly exports: load the dataset, render a page or CSV |
-| `src/site.rs` | Builds the static site in `dist/` |
+| `src/lib.rs` | The code shared by the server and the static site |
+| `src/site.rs` | Builds the static site in `dist/`: the page and `data.json` |
 | `src/fetch.rs` | Downloads and parses Job Bank and StatCan data |
 | `src/data.rs` | On-disk JSON format and the compact in-memory dataset |
 | `src/query.rs` | URL parameters, filtering, sorting |
@@ -137,8 +136,8 @@ Job Bank CSVs + StatCan API ──fetch.rs──▶ data/jobs.json ──data.rs
 | `src/regions.rs` | Provinces and territories, with each data source's codes |
 | `src/canada_map.rs` | Generated province outlines (don't edit; rerun `tools/gen_map.py`) |
 | `static/styles.css` | Stylesheet, built into the binary |
-| `static/app.js` | Static site only: loads the WebAssembly renderer and handles links, forms and downloads in the browser |
-| `tools/build-site.sh` | Compiles the WebAssembly and builds the static site |
+| `static/index.html` | Static site only: the treemap page (karpathy/jobs' styles, with this project's data) |
+| `tools/build-site.sh` | Builds the static site |
 | `tests/real_data.rs` | Renders views from the bundled data |
 | `e2e/smoke.spec.js`, `playwright.config.js` | Browser smoke tests (Playwright) |
 | `wrangler.jsonc` | Cloudflare config for the static site |
@@ -150,12 +149,10 @@ Job Bank CSVs + StatCan API ──fetch.rs──▶ data/jobs.json ──data.rs
 
 The live site, https://canada-job-tracker.w2riz.workers.dev, is static files on Cloudflare Workers. No server code runs, so it's free. `tools/build-site.sh` builds `dist/`, which contains:
 
-- `index.html`: the default view, rendered ahead of time so it shows straight away
-- the dataset (11 MB; about 2.7 MB as sent, compressed)
-- the WebAssembly renderer (600 KB; about 200 KB as sent)
-- `static/app.js`
+- `index.html`: the treemap page (`static/index.html`)
+- `data.json`: one tile per occupation for the last 45 days of postings, about 150 KB
 
-The browser downloads the dataset once. After that, `app.js` renders each view with the same Rust code the server uses, so filters, chart links, paging, the back button and CSV downloads work as they do on the server, without page reloads. Every URL is served `index.html`, and `app.js` draws the view the URL asks for. Without JavaScript, only the default view shows.
+The page fetches `data.json` and draws the treemap. Each tile's layer (median wage, wage against StatCan, full-time share or training level) is set by the buttons above it, and clicking a tile opens a Job Bank search for that occupation. Without JavaScript, the page shows only its text.
 
 **Deploys are automatic.** The `canada-job-tracker` Worker is connected to this repo through [Workers Builds](https://developers.cloudflare.com/workers/ci-cd/builds/), Cloudflare's Git integration, which is free. On every push to `main`, Cloudflare runs `npm run build`, then `npx wrangler deploy`. Its build machines don't come with Rust, so `tools/build-site.sh` installs it first. Build logs are in the Cloudflare dashboard, under the Worker's **Deployments**.
 
@@ -164,7 +161,6 @@ The browser downloads the dataset once. After that, `app.js` renders each view w
 To deploy by hand instead, you need Rust, Node and a Cloudflare account:
 
 ```bash
-rustup target add wasm32-unknown-unknown   # first time only
 npm install
 npx wrangler login                          # first time only
 npm run deploy                              # builds dist/, then uploads it
