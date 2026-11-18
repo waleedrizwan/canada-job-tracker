@@ -61,7 +61,7 @@ All sources are official, free and need no API key.
 | [StatCan population estimates, table 17-10-0009-01](https://www150.statcan.gc.ca/t1/tbl1/en/tv.action?pid=1710000901) | Population by province/territory, for postings per 10,000 people on the map | Quarterly |
 | [Natural Earth](https://www.naturalearthdata.com/) 1:50m admin-1 boundaries (public domain) | Province and territory outlines, converted once into `src/canada_map.rs` by `tools/gen_map.py` | Static |
 
-**The data stays up to date by itself.** The server checks both sources every `REFRESH_HOURS`. When Job Bank publishes a new month or StatCan a new quarter, the server downloads it in the background and switches over without restarting. For the live site, a daily GitHub Actions job checks instead, and new data is deployed automatically (see [Deploying](#deploying)).
+**The data stays up to date by itself.** The server checks both sources every `REFRESH_HOURS`. When Job Bank publishes a new month or StatCan a new quarter, the server downloads it in the background and switches over without restarting. For the live site, a daily GitHub Actions job checks instead, commits any new data, and redeploys the site (see [Deploying](#deploying)).
 
 To fetch data by hand (for example, to update the copy bundled in the repo):
 
