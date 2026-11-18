@@ -1,6 +1,6 @@
 # Keeps the live site current. Every day it checks whether Job Bank or StatCan has published new
-# data; if so, it commits the new data/jobs.json to main. Cloudflare (Workers Builds, connected to
-# this repo) rebuilds and deploys the site on every push to main, including that one.
+# data; if so, it commits the new data/jobs.json to main and deploys the site (deploy-site.yml).
+# Pushes made with the default token don't start other workflows, so the deploy is called here.
 name: Update data
 
 on:
@@ -20,6 +20,8 @@ jobs:
   update:
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    outputs:
+      changed: ${{ steps.commit.outputs.changed }}
     steps:
       - uses: actions/checkout@v5
       - uses: Swatinem/rust-cache@v2
@@ -43,12 +45,21 @@ jobs:
           exit 1
 
       - name: Commit new data
+        id: commit
         run: |
           if git diff --quiet data/jobs.json; then
             echo "No new data."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git commit -m "Update data to $(jq -r .asOf data/jobs.json)" data/jobs.json
             git push
+            echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
+
+  deploy:
+    needs: update
+    if: needs.update.outputs.changed == 'true'
+    uses: ./.github/workflows/deploy-site.yml
+    secrets: inherit
