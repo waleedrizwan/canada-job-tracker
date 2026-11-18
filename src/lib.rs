@@ -1,5 +1,5 @@
-//! Canada Job Tracker: the dataset, filtering and page rendering. Shared by the server
-//! (src/main.rs) and the WebAssembly build that renders pages in the browser (src/wasm.rs).
+//! Canada Job Tracker: the dataset, filtering and page rendering, for the server (src/main.rs)
+//! and the static site (src/site.rs).
 
 mod canada_map;
 pub mod charts;
@@ -8,11 +8,8 @@ pub mod data;
 pub mod fetch;
 pub mod query;
 pub mod regions;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod site;
 pub mod views;
-#[cfg(target_arch = "wasm32")]
-mod wasm;
 
 /// Bootstrap 5.3.3 (MIT, static/vendor), then the site's own few rules, served as one stylesheet.
 pub const STYLES: &str = concat!(include_str!("../static/vendor/bootstrap.min.css"), "\n", include_str!("../static/styles.css"));

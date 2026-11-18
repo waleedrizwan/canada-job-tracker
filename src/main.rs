@@ -3,7 +3,7 @@
 //!   canada-job-tracker                 serve the dashboard (PORT, default 8080)
 //!   canada-job-tracker fetch           download fresh data into DATA_PATH and exit
 //!   canada-job-tracker update          like fetch, but only if newer data has been published
-//!   canada-job-tracker site WASM [OUT] build the static site (see src/site.rs) into OUT, default dist
+//!   canada-job-tracker site [OUT]      build the static site (see src/site.rs) into OUT, default dist
 //!
 //! Env: DATA_PATH (default data/jobs.json), MONTHS (Job Bank months to keep, default 3),
 //! REFRESH_HOURS (how often the server checks for new releases, default 6; 0 disables).
@@ -93,11 +93,9 @@ async fn main() -> Result<()> {
             return Ok(());
         }
         Some("site") => {
-            let wasm_path = args.get(1).context("usage: canada-job-tracker site WASM [OUT]")?;
-            let out = args.get(2).map_or("dist", String::as_str);
+            let out = args.get(1).map_or("dist", String::as_str);
             let data = std::fs::read(&data_path).with_context(|| format!("reading {data_path}"))?;
-            let wasm = std::fs::read(wasm_path).with_context(|| format!("reading {wasm_path}"))?;
-            site::build(&Dataset::from_json(&data)?, &data, &wasm, std::path::Path::new(out))?;
+            site::build(&Dataset::from_json(&data)?, std::path::Path::new(out))?;
             eprintln!("Built the static site in {out}");
             return Ok(());
         }
@@ -130,7 +128,7 @@ async fn main() -> Result<()> {
 }
 
 /// The view a query string asks for. A malformed one (say, a parameter given twice) gets the
-/// default view rather than an error, as in the browser build (src/wasm.rs).
+/// default view rather than an error.
 fn params(q: Result<Query<Params>, QueryRejection>) -> Params {
     q.map(|Query(p)| p).unwrap_or_default().normalize()
 }
