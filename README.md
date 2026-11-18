@@ -154,11 +154,11 @@ The live site, https://canada-job-tracker.w2riz.workers.dev, is static files on 
 
 The page fetches `data.json` and draws the treemap. Each tile's layer (median wage, wage against StatCan, full-time share or training level) is set by the buttons above it, and clicking a tile opens a Job Bank search for that occupation. Without JavaScript, the page shows only its text.
 
-**Deploys are meant to be automatic, but aren't right now.** The `canada-job-tracker` Worker was connected to this repo through [Workers Builds](https://developers.cloudflare.com/workers/ci-cd/builds/), which should run `npm run build` and `npx wrangler deploy` on every push to `main`. As of 18 November 2026, pushes don't trigger it: the last automatic deploy was on 4 November. Check the connection in the Cloudflare dashboard, under the Worker's **Settings → Builds**. Until it's fixed, deploy by hand (see below).
+**Deploys run in GitHub Actions.** `.github/workflows/deploy-site.yml` builds the site and runs `wrangler deploy`. It runs on every push to `main` that changes the site, and after each daily data update. It needs two repository secrets: `CLOUDFLARE_API_TOKEN` (a token with Workers edit permission) and `CLOUDFLARE_ACCOUNT_ID`. You can also run it by hand from the Actions tab.
 
-**Data updates.** A static site can't refresh itself, so `.github/workflows/update-data.yml` does it. Every day at 15:17 UTC, after StatCan's 8:30 a.m. ET releases, it runs `cargo run --release -- update`. If Job Bank or StatCan has published something new, it commits the new `data/jobs.json` to `main`. Redeploying the site is then a manual step (see below) until the Cloudflare connection works again. Neither step needs a Cloudflare API token in GitHub.
+**Data updates.** A static site can't refresh itself, so `.github/workflows/update-data.yml` does it. Every day at 15:17 UTC, after StatCan's 8:30 a.m. ET releases, it runs `cargo run --release -- update`. If Job Bank or StatCan has published something new, it commits the new `data/jobs.json` to `main`. Then `deploy-site.yml` redeploys the site.
 
-To deploy by hand instead, you need Rust, Node and a Cloudflare account:
+To deploy by hand instead (for example, if the GitHub workflow is failing), you need Rust, Node and a Cloudflare account:
 
 ```bash
 npm install
